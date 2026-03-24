@@ -1,0 +1,752 @@
+#!/usr/bin/env python3
+
+import sys
+import time
+import json
+import logging
+import numpy as np
+from collections import defaultdict
+from datetime import datetime, timezone
+from logging.handlers import RotatingFileHandler
+
+from scapy.all import sniff, IP, TCP, UDP, ICMP, Ether, Raw
+import paho.mqtt.client as mqtt
+
+class Config:
+    INTERFACE = "wlan0"
+
+    # Flow Management
+    FLOW_TIMEOUT = 120
+    FLOW_EXPORT_INTERVAL = 10
+    MAX_FLOWS = 10000
+    CLEANUP_INTERVAL = 30
+    FLOW_MAX_AGE = 30
+
+    # MQTT
+    MQTT_ENABLED = True
+    MQTT_BROKER = "192.168.8.135"
+    MQTT_PORT = 1883
+    MQTT_TOPIC_EDGE = "metadata/extracted"
+    MQTT_TOPIC_CLOUD = "cloud/metadata"
+    MQTT_QOS = 1
+    MQTT_CLIENT_ID = "feature_extractor_pi4"
+    MQTT_KEEPALIVE = 60
+    MQTT_USERNAME = None
+    MQTT_PASSWORD = None
+
+    # Output
+    OUTPUT_FILE = "extracted_features.jsonl"
+    LOG_FILE = "feature_extractor.log"
+
+    # Feature Extraction
+    ENABLE_MQTT_PARSING = True
+    ENABLE_PROTOCOL_DETECTION = True
+    CALCULATION_PRECISION = 6
+
+
+# Protocol & Port Constants
+PROTOCOL_TCP, PROTOCOL_UDP, PROTOCOL_ICMP = 6, 17, 1
+TCP_FIN, TCP_SYN, TCP_RST, TCP_PSH, TCP_ACK, TCP_URG, TCP_ECE, TCP_CWR = 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80
+
+APP_PORTS = {
+    80: "HTTP", 443: "HTTPS", 53: "DNS", 23: "Telnet",
+    25: "SMTP", 22: "SSH", 194: "IRC", 6667: "IRC",
+    67: "DHCP", 68: "DHCP", 1883: "MQTT", 8883: "MQTT"
+}
+
+#logging
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+_file_fmt = logging.Formatter('%(asctime)s | %(levelname)-8s | %(funcName)s:%(lineno)d | %(message)s')
+_console_fmt = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+
+_fh = RotatingFileHandler(Config.LOG_FILE, maxBytes=50*1024*1024, backupCount=5)
+_fh.setLevel(logging.DEBUG); _fh.setFormatter(_file_fmt)
+
+_ch = logging.StreamHandler()
+_ch.setLevel(logging.INFO); _ch.setFormatter(_console_fmt)
+
+logger.addHandler(_fh); logger.addHandler(_ch)
+
+#MQTT
+class MQTTParser:
+    """Parse MQTT protocol features from TCP payload bytes."""
+
+    @staticmethod
+    def parse(payload):
+        result = {'msgtype': 0, 'qos': 0, 'dupflag': 0, 'retain': 0, 'len': 0, 'topic_len': 0}
+        if not payload or len(payload) < 2:
+            return result
+        try:
+            first = payload[0]
+            result['msgtype'] = (first >> 4) & 0x0F
+            result['dupflag'] = (first >> 3) & 0x01
+            result['qos'] = (first >> 1) & 0x03
+            result['retain'] = first & 0x01
+
+            remaining, multiplier, pos = 0, 1, 1
+            while pos < len(payload):
+                b = payload[pos]
+                remaining += (b & 0x7F) * multiplier
+                multiplier *= 128
+                pos += 1
+                if (b & 0x80) == 0:
+                    break
+            result['len'] = remaining
+
+            if result['msgtype'] == 3 and pos + 2 <= len(payload):
+                result['topic_len'] = (payload[pos] << 8) | payload[pos + 1]
+        except Exception as e:
+            logger.debug(f"MQTT parse error: {e}")
+        return result
+
+
+class Flow:
+
+    def __init__(self, flow_key):
+        self.flow_key = flow_key
+        self.start_time = time.time()
+        self.last_seen = self.start_time
+
+        # Initiator for fwd/bwd separation
+        self.initiator_ip = ""
+        self.initiator_port = 0
+
+        # Timestamps
+        self.packet_times = []
+        self.fwd_packet_times = []
+        self.bwd_packet_times = []
+
+        # Directional counters
+        self.fwd_pkts = 0;  self.fwd_bytes = 0
+        self.bwd_pkts = 0;  self.bwd_bytes = 0
+
+        # Packet lengths per direction
+        self.fwd_lengths = []
+        self.bwd_lengths = []
+
+        # TCP flags
+        self.syn = 0; self.ack = 0; self.rst = 0
+        self.urg = 0; self.psh = 0; self.fin = 0
+        self.ece = 0; self.cwr = 0
+
+        # Protocol flags
+        self.is_tcp = False; self.is_udp = False; self.is_icmp = False
+        self.is_arp = False; self.is_ipv4 = False; self.is_llc = False
+        self.is_http = False; self.is_https = False; self.is_dns = False
+        self.is_telnet = False; self.is_smtp = False; self.is_ssh = False
+        self.is_irc = False; self.is_dhcp = False
+        self.protocol_type = 0
+
+        # Frame / TCP detail lists
+        self.frame_lengths = []
+        self.frame_cap_lengths = []
+        self.frame_time_deltas = []
+        self.tcp_lengths = []
+        self.tcp_time_deltas = []
+        self.tcp_window_sizes = []
+        self.tcp_flags_values = []
+        self.ttl_values = []
+        self.ip_header_lengths = []
+        self.init_win_bytes_fwd = None
+
+        # MQTT accumulators
+        self.mqtt_msgtype = []; self.mqtt_qos = []
+        self.mqtt_dupflag = []; self.mqtt_retain = []
+        self.mqtt_len = [];     self.mqtt_topic_len = []
+
+        # Track last TCP packet time for tcp.time_delta
+        self._last_tcp_time = None
+
+        # Export state tracking, hybrid export logic to prevents duplicate exports
+        self.exported_once = False           # True after first export
+        self.packet_count_at_last_export = 0 # Packet count snapshot at last export
+        self.tcp_completed = False           # True if FIN or RST seen (flow is done)
+
+    def update(self, pkt, timestamp):
+        """Update flow with a new packet."""
+        self.last_seen = timestamp
+        self.packet_times.append(timestamp)
+
+        if IP not in pkt:
+            # Check non-IP layers
+            if pkt.haslayer('ARP'): self.is_arp = True
+            if pkt.haslayer('LLC'): self.is_llc = True
+            return
+
+        ip = pkt[IP]
+        pkt_len = len(pkt)
+        ip_hdr_len = ip.ihl * 4
+
+        self.is_ipv4 = True
+        if not self.protocol_type:
+            self.protocol_type = ip.proto
+        self.ttl_values.append(ip.ttl)
+        self.ip_header_lengths.append(ip_hdr_len)
+        self.frame_lengths.append(pkt_len)
+
+        # frame.cap_len (wirelen if available, else pkt_len)
+        wl = getattr(pkt, 'wirelen', None)
+        self.frame_cap_lengths.append(wl if wl is not None else pkt_len)
+
+        # frame.time_delta
+        if len(self.packet_times) > 1:
+            self.frame_time_deltas.append(timestamp - self.packet_times[-2])
+
+        # Direction
+        is_fwd = (ip.src == self.initiator_ip)
+        if is_fwd:
+            self.fwd_pkts += 1; self.fwd_bytes += pkt_len
+            self.fwd_lengths.append(pkt_len)
+            self.fwd_packet_times.append(timestamp)
+        else:
+            self.bwd_pkts += 1; self.bwd_bytes += pkt_len
+            self.bwd_lengths.append(pkt_len)
+            self.bwd_packet_times.append(timestamp)
+
+        # Capture initial window (first packet only)
+        if self.init_win_bytes_fwd is None and TCP in pkt:
+            self.init_win_bytes_fwd = pkt[TCP].window
+
+        # ---- TCP ----
+        if TCP in pkt:
+            self.is_tcp = True
+            tcp = pkt[TCP]
+            self.tcp_lengths.append(len(tcp.payload) if tcp.payload else 0)
+            self.tcp_window_sizes.append(tcp.window)
+            f = int(tcp.flags)
+            self.tcp_flags_values.append(f)
+
+            if f & TCP_SYN: self.syn += 1
+            if f & TCP_ACK: self.ack += 1
+            if f & TCP_RST: self.rst += 1
+            if f & TCP_PSH: self.psh += 1
+            if f & TCP_URG: self.urg += 1
+            if f & TCP_FIN: self.fin += 1
+            if f & TCP_ECE: self.ece += 1
+            if f & TCP_CWR: self.cwr += 1
+
+            # Mark flow as completed if FIN or RST seen
+            if f & (TCP_FIN | TCP_RST):
+                self.tcp_completed = True
+
+            # tcp.time_delta
+            if self._last_tcp_time is not None:
+                self.tcp_time_deltas.append(timestamp - self._last_tcp_time)
+            self._last_tcp_time = timestamp
+
+            # Protocol detection by port
+            if Config.ENABLE_PROTOCOL_DETECTION:
+                self._detect_app_protocol(tcp.sport, tcp.dport, pkt)
+
+        # ---- UDP ----
+        elif UDP in pkt:
+            self.is_udp = True
+            if Config.ENABLE_PROTOCOL_DETECTION:
+                udp = pkt[UDP]
+                for p in (udp.sport, udp.dport):
+                    proto = APP_PORTS.get(p)
+                    if proto == "DNS": self.is_dns = True
+                    elif proto == "DHCP": self.is_dhcp = True
+
+        # ---- ICMP ----
+        elif ICMP in pkt:
+            self.is_icmp = True
+
+        # Non-IP layers
+        if pkt.haslayer('ARP'): self.is_arp = True
+        if pkt.haslayer('LLC'): self.is_llc = True
+
+    def _detect_app_protocol(self, sport, dport, pkt):
+        """Detect application-layer protocol by port and parse MQTT if found."""
+        for port in (sport, dport):
+            proto = APP_PORTS.get(port)
+            if not proto:
+                continue
+            if   proto == "HTTP":    self.is_http = True
+            elif proto == "HTTPS":   self.is_https = True
+            elif proto == "DNS":     self.is_dns = True
+            elif proto == "Telnet":  self.is_telnet = True
+            elif proto == "SMTP":    self.is_smtp = True
+            elif proto == "SSH":     self.is_ssh = True
+            elif proto == "IRC":     self.is_irc = True
+            elif proto == "DHCP":    self.is_dhcp = True
+            elif proto == "MQTT":
+                if Config.ENABLE_MQTT_PARSING and Raw in pkt:
+                    m = MQTTParser.parse(bytes(pkt[Raw]))
+                    if m['msgtype'] > 0:
+                        self.mqtt_msgtype.append(m['msgtype'])
+                        self.mqtt_qos.append(m['qos'])
+                        self.mqtt_dupflag.append(m['dupflag'])
+                        self.mqtt_retain.append(m['retain'])
+                        self.mqtt_len.append(m['len'])
+                        self.mqtt_topic_len.append(m['topic_len'])
+
+    def calculate_features(self):
+        duration = self.last_seen - self.start_time
+        dur_s = max(duration, 0.001)
+        total_pkts = self.fwd_pkts + self.bwd_pkts
+        total_bytes = self.fwd_bytes + self.bwd_bytes
+
+        def sdiv(a, b): return a / b if b else 0.0
+        def avg(lst):   return float(np.mean(lst)) if lst else 0.0
+        def std(lst):   return float(np.std(lst))  if lst else 0.0
+        def var(lst):   return float(np.var(lst))   if lst else 0.0
+        def mn(lst):    return float(np.min(lst))   if lst else 0.0
+        def mx(lst):    return float(np.max(lst))   if lst else 0.0
+        def sm(lst):    return float(np.sum(lst))    if lst else 0.0
+
+        # IATs
+        iats = list(np.diff(self.packet_times)) if len(self.packet_times) > 1 else []
+
+        features = {
+            # Flow metrics
+            0: duration,
+            1: sdiv(total_pkts, dur_s),
+            2: sdiv(total_bytes, dur_s),
+
+            # TCP flag counts
+            3: self.syn, 4: self.ack, 5: self.rst,
+            6: self.urg, 7: self.psh, 8: self.fin,
+            9: avg(self.tcp_flags_values),
+
+            # Protocol binary flags
+            10: int(self.is_tcp),    11: int(self.is_udp),    12: int(self.is_icmp),
+            13: int(self.is_arp),    14: int(self.is_dns),    15: int(self.is_http),
+            16: int(self.is_https),  17: int(self.is_telnet), 18: int(self.is_smtp),
+            19: int(self.is_ssh),    20: int(self.is_irc),    21: int(self.is_dhcp),
+            22: int(self.is_ipv4),   23: int(self.is_llc),
+
+            # IP protocol number
+            24: self.protocol_type,
+
+            # Packet size stats
+            25: avg(self.frame_lengths),
+            26: var(self.frame_lengths),
+
+            # Counts
+            27: total_pkts,          28: total_bytes,
+            29: self.fwd_pkts,       30: self.bwd_pkts,
+            31: self.fwd_bytes,      32: self.bwd_bytes,
+
+            # Directional means
+            33: sdiv(self.fwd_bytes, self.fwd_pkts),
+            34: sdiv(self.bwd_bytes, self.bwd_pkts),
+
+            # Aggregate sizes
+            35: sm(self.frame_lengths),
+            36: total_bytes,
+            37: avg(self.frame_lengths),
+            38: std(self.frame_lengths),
+
+            # IAT
+            39: avg(iats), 40: std(iats), 41: mn(iats), 42: mx(iats), 43: sm(iats),
+
+            # Frame / TCP time deltas
+            44: avg(self.frame_time_deltas),
+            45: avg(self.tcp_time_deltas),
+
+            # Frame / TCP metrics
+            46: avg(self.tcp_lengths),
+            47: avg(self.frame_lengths),
+            48: avg(self.frame_cap_lengths),
+            49: avg(self.tcp_window_sizes),
+
+            # MQTT
+            50: avg(self.mqtt_msgtype),   51: avg(self.mqtt_qos),
+            52: avg(self.mqtt_dupflag),   53: avg(self.mqtt_retain),
+            54: avg(self.mqtt_len),       55: avg(self.mqtt_topic_len),
+
+            # IP metadata
+            56: avg(self.ttl_values),
+            57: avg(self.ip_header_lengths),
+            58: self.init_win_bytes_fwd if self.init_win_bytes_fwd is not None else 0,
+
+            # IPs
+            59: self.flow_key[0],
+            60: self.flow_key[1],
+        }
+
+        # Round floats
+        for k in features:
+            if isinstance(features[k], float):
+                features[k] = round(features[k], Config.CALCULATION_PRECISION)
+
+        return features
+
+
+class MQTTPublisher:
+    """Handles MQTT publishing to Edge ML and Cloud."""
+
+    def __init__(self):
+        self.is_connected = False
+        self.publish_count = 0
+        self.failed = 0
+        self.client = None
+
+        if not Config.MQTT_ENABLED:
+            return
+
+        try:
+            self.client = mqtt.Client(
+                callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
+                client_id=Config.MQTT_CLIENT_ID,
+                clean_session=True,
+                protocol=mqtt.MQTTv311
+            )
+            self.client.on_connect = self._on_connect
+            self.client.on_disconnect = self._on_disconnect
+            self.client.on_publish = self._on_publish
+
+            if Config.MQTT_USERNAME and Config.MQTT_PASSWORD:
+                self.client.username_pw_set(Config.MQTT_USERNAME, Config.MQTT_PASSWORD)
+
+            logger.info(f"MQTT client initialized for {Config.MQTT_BROKER}:{Config.MQTT_PORT}")
+        except Exception as e:
+            logger.error(f"MQTT init failed: {e}")
+
+    def _on_connect(self, client, userdata, flags, rc, properties):
+        if rc == 0:
+            self.is_connected = True
+            logger.info(f"Connected to MQTT broker at {Config.MQTT_BROKER}:{Config.MQTT_PORT}")
+        else:
+            self.is_connected = False
+            logger.error(f"MQTT connect failed, code: {rc}")
+
+    def _on_disconnect(self, client, userdata, flags, rc, properties):
+        self.is_connected = False
+        if rc != 0:
+            logger.warning("Unexpected MQTT disconnect, will try reconnect")
+        else:
+            logger.info("MQTT disconnected cleanly")
+
+    def _on_publish(self, client, userdata, mid, rc, properties):
+        self.publish_count += 1
+
+    def connect(self):
+        if not Config.MQTT_ENABLED or not self.client:
+            return False
+        try:
+            self.client.connect(Config.MQTT_BROKER, Config.MQTT_PORT, Config.MQTT_KEEPALIVE)
+            self.client.loop_start()
+            # Wait up to 5s for connection
+            deadline = time.time() + 5
+            while not self.is_connected and time.time() < deadline:
+                time.sleep(0.1)
+            if self.is_connected:
+                logger.info("MQTT connection established")
+            else:
+                logger.error("MQTT connection timeout")
+            return self.is_connected
+        except Exception as e:
+            logger.error(f"MQTT connect error: {e}")
+            return False
+
+    def disconnect(self):
+        if self.client and self.is_connected:
+            self.client.loop_stop()
+            self.client.disconnect()
+            logger.info("MQTT disconnected")
+
+    def publish_flow(self, flow_data):
+        if not self.is_connected:
+            return
+        try:
+            result = self.client.publish(Config.MQTT_TOPIC_EDGE, json.dumps(flow_data), qos=Config.MQTT_QOS)
+            if result.rc != mqtt.MQTT_ERR_SUCCESS:
+                self.failed += 1
+                logger.warning(f"MQTT publish failed: {result.rc}")
+        except Exception as e:
+            self.failed += 1
+            logger.error(f"MQTT publish error: {e}")
+
+    def publish_batch(self, flows):
+        if not self.is_connected:
+            return
+        try:
+            batch = {
+                'batch_id': f"batch_{int(time.time())}",
+                'timestamp': datetime.now(timezone.utc).isoformat(),
+                'count': len(flows),
+                'flows': flows
+            }
+            result = self.client.publish(Config.MQTT_TOPIC_CLOUD, json.dumps(batch), qos=Config.MQTT_QOS)
+            if result.rc == mqtt.MQTT_ERR_SUCCESS:
+                logger.info(f"Batch of {len(flows)} flows published to cloud")
+            else:
+                self.failed += 1
+        except Exception as e:
+            self.failed += 1
+            logger.error(f"Batch publish error: {e}")
+
+    def stats(self):
+        total = self.publish_count + self.failed
+        return {
+            'total_published': self.publish_count,
+            'failed': self.failed,
+            'success_rate': (self.publish_count / max(total, 1)) * 100
+        }
+
+class FlowManager:
+    """Manages active flows, periodic export, and cleanup."""
+
+    def __init__(self):
+        self.flows = {}
+        self.packet_count = 0
+        self.flow_count = 0
+        self.last_cleanup = time.time()
+        self.last_export = time.time()
+        self.mqtt = MQTTPublisher()
+        logger.info("FlowManager initialized")
+
+    def _make_key(self, pkt):
+        """Generate bidirectional 5-tuple flow key."""
+        if IP not in pkt:
+            return None
+        src, dst, proto = pkt[IP].src, pkt[IP].dst, pkt[IP].proto
+        sp, dp = 0, 0
+        if TCP in pkt:   sp, dp = pkt[TCP].sport, pkt[TCP].dport
+        elif UDP in pkt: sp, dp = pkt[UDP].sport, pkt[UDP].dport
+
+        if (src, sp) < (dst, dp):
+            return (src, dst, sp, dp, proto)
+        return (dst, src, dp, sp, proto)
+
+    def process_packet(self, pkt):
+        """Process a single captured packet."""
+        try:
+            now = time.time()
+            self.packet_count += 1
+
+            if self.packet_count % 1000 == 0:
+                logger.debug(f"Processed {self.packet_count} packets, active flows: {len(self.flows)}")
+
+            key = self._make_key(pkt)
+            if not key:
+                return
+
+            # Create new flow if needed
+            if key not in self.flows:
+                if len(self.flows) >= Config.MAX_FLOWS:
+                    logger.warning(f"Max flows ({Config.MAX_FLOWS}) reached, forcing cleanup")
+                    self._cleanup(force=True)
+
+                flow = Flow(flow_key=key)
+                # Set initiator from first packet
+                if IP in pkt:
+                    flow.initiator_ip = pkt[IP].src
+                    if TCP in pkt:   flow.initiator_port = pkt[TCP].sport
+                    elif UDP in pkt: flow.initiator_port = pkt[UDP].sport
+                self.flows[key] = flow
+                self.flow_count += 1
+                logger.info(f"New flow: {key[0]}:{key[2]} <-> {key[1]}:{key[3]} proto={key[4]} (total={self.flow_count})")
+
+            self.flows[key].update(pkt, now)
+
+            # Periodic cleanup
+            if now - self.last_cleanup > Config.CLEANUP_INTERVAL:
+                self._cleanup()
+                self.last_cleanup = now
+
+            # Periodic export
+            if now - self.last_export >= Config.FLOW_EXPORT_INTERVAL:
+                self.export_flows()
+                self.last_export = now
+
+        except Exception as e:
+            logger.error(f"Error processing packet: {e}", exc_info=True)
+
+    def _cleanup(self, force=False):
+        """Remove expired flows and flows that hit the hard age cap."""
+        now = time.time()
+        expired_keys = []
+        age_capped_keys = []
+
+        for key, flow in self.flows.items():
+            inactivity = now - flow.last_seen
+            age = now - flow.start_time
+
+            if force or inactivity > Config.FLOW_TIMEOUT:
+                expired_keys.append(key)
+            elif age > Config.FLOW_MAX_AGE:
+                # Hard age cap hit — export before evicting
+                age_capped_keys.append(key)
+
+        # Export age-capped flows as final before removing
+        if age_capped_keys:
+            self._export_specific_flows(age_capped_keys, export_reason="age_cap", is_final=True)
+            for key in age_capped_keys:
+                del self.flows[key]
+
+        # Remove expired flows (already exported or inactive)
+        for key in expired_keys:
+            del self.flows[key]
+
+        total_removed = len(expired_keys) + len(age_capped_keys)
+        if total_removed:
+            logger.info(f"Cleaned up {len(expired_keys)} timed-out, {len(age_capped_keys)} age-capped flows (remaining: {len(self.flows)})")
+
+    def _export_specific_flows(self, flow_keys, export_reason="interval", is_final=False):
+        if not flow_keys:
+            return
+
+        exported = 0
+        flows_for_batch = []
+
+        try:
+            with open(Config.OUTPUT_FILE, 'a') as f:
+                for key in flow_keys:
+                    flow = self.flows.get(key)
+                    if not flow:
+                        continue
+
+                    features = flow.calculate_features()
+                    current_pkt_count = flow.fwd_pkts + flow.bwd_pkts
+
+                    flow_data = {
+                        'flow_id': f"{key[0]}:{key[2]}-{key[1]}:{key[3]}/{key[4]}",
+                        'src_ip': key[0], 'dst_ip': key[1],
+                        'src_port': key[2], 'dst_port': key[3],
+                        'protocol': key[4],
+                        'timestamp': datetime.fromtimestamp(flow.start_time).isoformat(),
+                        'is_final': is_final,
+                        'export_reason': export_reason,
+                        'features': features
+                    }
+
+                    f.write(json.dumps(flow_data) + '\n')
+                    flows_for_batch.append(flow_data)
+
+                    if self.mqtt.is_connected:
+                        self.mqtt.publish_flow(flow_data)
+
+                    # Update export state on the flow
+                    flow.exported_once = True
+                    flow.packet_count_at_last_export = current_pkt_count
+
+                    exported += 1
+
+            if flows_for_batch and self.mqtt.is_connected:
+                self.mqtt.publish_batch(flows_for_batch)
+
+            logger.debug(f"_export_specific_flows: {exported} flows, reason={export_reason}, is_final={is_final}")
+
+        except Exception as e:
+            logger.error(f"Error in _export_specific_flows: {e}", exc_info=True)
+
+    def export_flows(self):
+        if not self.flows:
+            return
+
+        # Categorize flows into buckets
+        first_export_keys = []      # Never exported before
+        new_packets_keys = []       # Has new packets since last export
+        completed_keys = []         # TCP FIN/RST seen
+
+        for key, flow in list(self.flows.items()):
+            current_pkt_count = flow.fwd_pkts + flow.bwd_pkts
+
+            # Check if TCP completed
+            if flow.tcp_completed and flow.is_tcp:
+                completed_keys.append(key)
+            # Check if never exported
+            elif not flow.exported_once:
+                first_export_keys.append(key)
+            # Check if has new packets
+            elif current_pkt_count > flow.packet_count_at_last_export:
+                new_packets_keys.append(key)
+            # else: unchanged — skip (this prevents duplicates!)
+
+        # Export each category
+        self._export_specific_flows(first_export_keys, export_reason="first", is_final=False)
+        self._export_specific_flows(new_packets_keys, export_reason="new_packets", is_final=False)
+        self._export_specific_flows(completed_keys, export_reason="completed", is_final=True)
+
+        # Evict completed flows
+        for key in completed_keys:
+            if key in self.flows:
+                del self.flows[key]
+
+        # Log summary
+        total_exported = len(first_export_keys) + len(new_packets_keys) + len(completed_keys)
+        skipped = len(self.flows) - total_exported + len(completed_keys)  # flows still active but not exported
+        mq = self.mqtt.stats()
+        logger.info(
+            f"Exported {total_exported} flows (first={len(first_export_keys)}, new={len(new_packets_keys)}, "
+            f"completed={len(completed_keys)}, skipped={max(0, len(self.flows))} unchanged) | "
+            f"pkts={self.packet_count}, mqtt={mq['total_published']} ok"
+        )
+
+    def get_stats(self):
+        return {
+            'total_packets': self.packet_count,
+            'total_flows': self.flow_count,
+            'active_flows': len(self.flows),
+            'uptime': time.time() - self.last_export
+        }
+
+
+def main():
+    logger.info("=" * 70)
+    logger.info("IoT Security Feature Extractor (61 Features)")
+    logger.info("=" * 70)
+    logger.info(f"Interface: {Config.INTERFACE}")
+    logger.info(f"Flow timeout: {Config.FLOW_TIMEOUT}s | Export interval: {Config.FLOW_EXPORT_INTERVAL}s")
+    logger.info(f"MQTT: {Config.MQTT_BROKER}:{Config.MQTT_PORT} | Topics: {Config.MQTT_TOPIC_EDGE}, {Config.MQTT_TOPIC_CLOUD}")
+    logger.info(f"Protocol detection: {Config.ENABLE_PROTOCOL_DETECTION} | MQTT parsing: {Config.ENABLE_MQTT_PARSING}")
+    logger.info("=" * 70)
+
+    fm = FlowManager()
+
+    if Config.MQTT_ENABLED:
+        logger.info("Connecting to MQTT broker...")
+        if fm.mqtt.connect():
+            logger.info("MQTT ready")
+        else:
+            logger.warning("MQTT connection failed, continuing without MQTT")
+
+    logger.info("Starting packet capture...")
+
+    try:
+        sniff(
+            iface=Config.INTERFACE,
+            prn=lambda pkt: fm.process_packet(pkt),
+            store=False
+        )
+    except KeyboardInterrupt:
+        logger.info("\n" + "=" * 70)
+        logger.info("SHUTTING DOWN")
+        logger.info("=" * 70)
+
+        # Final export
+        fm.export_flows()
+
+        # Disconnect MQTT
+        if Config.MQTT_ENABLED:
+            fm.mqtt.disconnect()
+
+        # Print stats
+        s = fm.get_stats()
+        mq = fm.mqtt.stats()
+        logger.info(f"  Packets processed: {s['total_packets']}")
+        logger.info(f"  Flows created:     {s['total_flows']}")
+        logger.info(f"  Active at exit:    {s['active_flows']}")
+        if Config.MQTT_ENABLED:
+            logger.info(f"  MQTT published:    {mq['total_published']}")
+            logger.info(f"  MQTT failed:       {mq['failed']}")
+            logger.info(f"  MQTT success:      {mq['success_rate']:.1f}%")
+        logger.info("=" * 70)
+        logger.info("Feature Extractor stopped")
+
+    except Exception as e:
+        logger.error(f"Fatal error: {e}", exc_info=True)
+        if Config.MQTT_ENABLED:
+            fm.mqtt.disconnect()
+        raise
+
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1:
+        Config.INTERFACE = sys.argv[1]
+    main()
