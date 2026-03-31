@@ -6,11 +6,13 @@ import psutil
 from datetime import datetime
 import paho.mqtt.client as mqtt
 
+
 BROKER = "192.168.8.135"       
 PORT = 1883
 TOPIC = "health/log"
 INTERFACE = "wlan0"             # Network interface to monitor
 INTERVAL = 10                   # Seconds between health reports
+
 
 # Processes to monitor (key services on Feature Extractor Pi)
 MONITORED_PROCESSES = {
@@ -21,6 +23,7 @@ MONITORED_PROCESSES = {
 
 sent_count = 0
 last_success_timestamp = None
+
 
 def get_cpu_temperature():
     #Read CPU temperature (Raspberry Pi specific)
@@ -37,6 +40,7 @@ def get_hardware_health():
     disk = psutil.disk_usage('/')
     net = psutil.net_io_counters(pernic=True)
 
+    
     # Get network stats for specified interface
     if INTERFACE in net:
         net_stats = net[INTERFACE]
@@ -89,6 +93,7 @@ def get_software_health(client):
     for label, proc_name in MONITORED_PROCESSES.items():
         services[label] = check_process(proc_name)
 
+    
     return {
         "services": services,
         "mqtt_connected": client.is_connected(),
@@ -100,6 +105,7 @@ def on_publish(client, userdata, mid):
     #Track successful MQTT publishes
     global last_success_timestamp
     last_success_timestamp = datetime.utcnow().isoformat()
+
 
 try:
     client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION1)
