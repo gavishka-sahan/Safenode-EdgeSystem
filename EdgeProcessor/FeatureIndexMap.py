@@ -132,26 +132,26 @@ def validate_indices(indices: List[int]) -> bool:
 
 def get_feature_indices_for_model(model_name: str) -> List[int]:
     MODEL_FEATURES = {
-        # MIRAI BOTNET 
+        # MIRAI BOTNET
         'mirai': [
-            0,0,1,3,6,5,15,16,14,17,18,19,20,10,11,21,13,12,
+            0, 0, 1, 3, 6, 5, 15, 16, 14, 17, 18, 19, 20, 10, 11, 21, 13, 12,
         ],
 
-        # DOS ATTACK 
+        # DOS ATTACK
         'dos': [
-            1,2,25,24,9,3,4,5,39,40,
+            1, 2, 25, 24, 9, 3, 4, 5, 39, 40,
         ],
 
         # SPOOFING
         'spoof': [
-            #13,14,23,0,1,43,35,36,37,38,4,3,10,11,12,22,
-            56,24,49,58,57,3,5,4,13,14,40,8,7,10,11,
+            # 13,14,23,0,1,43,35,36,37,38,4,3,10,11,12,22,
+            56, 24, 49, 58, 57, 3, 5, 4, 13, 14, 40, 8, 7, 10, 11,
         ],
 
         # REPLAY ATTACK
         'replay': [
-            #44,45,46,47,48,49,9,50,51,52,53,54,55,24,
-            52,58,40,39,26,49,5,3,56,54,
+            # 44,45,46,47,48,49,9,50,51,52,53,54,55,24,
+            52, 58, 40, 39, 26, 49, 5, 3, 56, 54,
         ],
     }
 
@@ -163,7 +163,7 @@ def get_model_info(model_name: str) -> Dict:
         'mirai': {
             'full_name': 'Mirai Botnet Detection',
             'attack_types': ['Mirai DDoS', 'Port Scanning', 'Telnet Brute Force'],
-            'feature_count': 0, 
+            'feature_count': 0,
             'model_file': 'mirai_model.onnx',
             'requires_scaler': False,
             'accuracy': 0.9999,
@@ -185,7 +185,7 @@ def get_model_info(model_name: str) -> Dict:
         'replay': {
             'full_name': 'Replay Attack Detection',
             'attack_types': ['Replay Attack', 'MQTT Replay'],
-            'feature_count': 0,  
+            'feature_count': 0,
             'model_file': 'replay_model.onnx',
             'model_format': 'XGBoost JSON',
             'requires_scaler': True,
@@ -194,7 +194,7 @@ def get_model_info(model_name: str) -> Dict:
         'dos': {
             'full_name': 'DoS Attack Detection',
             'attack_types': ['DDoS', 'SYN Flood', 'UDP Flood'],
-            'feature_count': 0,  
+            'feature_count': 0,
             'model_file': 'dos_model.onnx',
             'requires_scaler': True,
             'dataset': 'Teammate dataset',
@@ -202,7 +202,7 @@ def get_model_info(model_name: str) -> Dict:
         'sniffing': {
             'full_name': 'Sniffing/Spoofing Detection',
             'attack_types': ['ARP Spoofing', 'DNS Spoofing', 'MAC Spoofing'],
-            'feature_count': 0,  
+            'feature_count': 0,
             'model_file': 'spoof_model.onnx',
             'requires_scaler': False,
             'dataset': 'CIC IoT Dataset 2023',
@@ -240,10 +240,10 @@ if __name__ == "__main__":
         if validate_indices(indices):
             print(f"  All indices valid (0-{TOTAL_FEATURES - 1})")
         else:
-            print(f"  ERROR: Invalid indices detected!")
+            print("  ERROR: Invalid indices detected!")
 
         if len(indices) > 0:
-            print(f"  Features used:")
+            print("  Features used:")
             for idx in indices[:10]:
                 print(f"    [{idx:2d}] {get_feature_name(idx)}")
             if len(indices) > 10:

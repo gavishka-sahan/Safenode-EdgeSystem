@@ -16,4 +16,3 @@ common = set1 & set2
 
 with open("result.txt", "w") as f:
     f.write("\n".join(common))
-
