@@ -1,6 +1,6 @@
 import string
 
-with open("file1.txt", "r") as f1:
+with open("dos_features.json", "r") as f1:
     content1 = f1.read()
 
 with open("file2.txt", "r") as f2:
@@ -16,3 +16,4 @@ common = set1 & set2
 
 with open("result.txt", "w") as f:
     f.write("\n".join(common))
+
