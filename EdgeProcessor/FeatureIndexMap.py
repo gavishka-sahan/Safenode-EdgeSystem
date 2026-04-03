@@ -278,4 +278,3 @@ if __name__ == "__main__":
     print(f"Feature coverage: {len(all_features_used)}/{TOTAL_FEATURES} "
           f"({len(all_features_used) / TOTAL_FEATURES * 100:.1f}%)")
     print(f"Unused indices: {sorted(set(range(TOTAL_FEATURES)) - all_features_used)}")
-

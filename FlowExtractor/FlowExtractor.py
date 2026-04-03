@@ -24,7 +24,7 @@ class Config:
 
     # MQTT
     MQTT_ENABLED = True
-    #MQTT_BROKER = "192.168.8.135"
+    # MQTT_BROKER = "192.168.8.135"
     MQTT_BROKER = "192.168.1.11"
     MQTT_PORT = 1883
     MQTT_TOPIC_EDGE = "metadata/extracted"
@@ -304,7 +304,6 @@ class Flow:
         # ICMP
         elif ICMP in pkt:
             self.is_icmp = True
-
 
         if pkt.haslayer('ARP'):
             self.is_arp = True
@@ -813,4 +812,3 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         Config.INTERFACE = sys.argv[1]
     main()
-
