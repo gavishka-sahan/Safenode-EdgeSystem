@@ -5,12 +5,16 @@ import time
 import json
 import logging
 import numpy as np
-from collections import defaultdict
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
 
-from scapy.all import sniff, IP, TCP, UDP, ICMP, Ether, Raw
+<<<<<<< HEAD
+from scapy.all import sniff, IP, TCP, UDP, ICMP, GRE, Raw
+=======
+from scapy.all import sniff, IP, TCP, UDP, ICMP, Raw
+>>>>>>> ef16f59a23004139291d6de6d6e38ae6f7d05b4b
 import paho.mqtt.client as mqtt
+
 
 class Config:
     INTERFACE = "wlan0"
@@ -24,7 +28,8 @@ class Config:
 
     # MQTT
     MQTT_ENABLED = True
-    MQTT_BROKER = "192.168.8.135"
+    #MQTT_BROKER = "192.168.8.135"
+    MQTT_BROKER = "192.168.1.11"
     MQTT_PORT = 1883
     MQTT_TOPIC_EDGE = "metadata/extracted"
     MQTT_TOPIC_CLOUD = "cloud/metadata"
@@ -43,9 +48,12 @@ class Config:
     ENABLE_PROTOCOL_DETECTION = True
     CALCULATION_PRECISION = 6
 
+    # frame_time_delta_bin threshold (seconds)
+    FRAME_TIME_DELTA_BIN_THRESHOLD = 0.1
+
 
 # Protocol & Port Constants
-PROTOCOL_TCP, PROTOCOL_UDP, PROTOCOL_ICMP = 6, 17, 1
+PROTOCOL_TCP, PROTOCOL_UDP, PROTOCOL_ICMP, PROTOCOL_GRE = 6, 17, 1, 47
 TCP_FIN, TCP_SYN, TCP_RST, TCP_PSH, TCP_ACK, TCP_URG, TCP_ECE, TCP_CWR = 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80
 
 APP_PORTS = {
@@ -54,22 +62,30 @@ APP_PORTS = {
     67: "DHCP", 68: "DHCP", 1883: "MQTT", 8883: "MQTT"
 }
 
-#logging
+# logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 _file_fmt = logging.Formatter('%(asctime)s | %(levelname)-8s | %(funcName)s:%(lineno)d | %(message)s')
 _console_fmt = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 
-_fh = RotatingFileHandler(Config.LOG_FILE, maxBytes=50*1024*1024, backupCount=5)
-_fh.setLevel(logging.DEBUG); _fh.setFormatter(_file_fmt)
+_fh = RotatingFileHandler(Config.LOG_FILE, maxBytes=50 * 1024 * 1024, backupCount=5)
+_fh.setLevel(logging.DEBUG)
+_fh.setFormatter(_file_fmt)
 
 _ch = logging.StreamHandler()
-_ch.setLevel(logging.INFO); _ch.setFormatter(_console_fmt)
+_ch.setLevel(logging.INFO)
+_ch.setFormatter(_console_fmt)
 
-logger.addHandler(_fh); logger.addHandler(_ch)
+logger.addHandler(_fh)
+logger.addHandler(_ch)
+<<<<<<< HEAD
+=======
 
-#MQTT
+# MQTT
+>>>>>>> ef16f59a23004139291d6de6d6e38ae6f7d05b4b
+
+
 class MQTTParser:
     """Parse MQTT protocol features from TCP payload bytes."""
 
@@ -119,24 +135,40 @@ class Flow:
         self.bwd_packet_times = []
 
         # Directional counters
-        self.fwd_pkts = 0;  self.fwd_bytes = 0
-        self.bwd_pkts = 0;  self.bwd_bytes = 0
+        self.fwd_pkts = 0
+        self.fwd_bytes = 0
+        self.bwd_pkts = 0
+        self.bwd_bytes = 0
 
         # Packet lengths per direction
         self.fwd_lengths = []
         self.bwd_lengths = []
 
         # TCP flags
-        self.syn = 0; self.ack = 0; self.rst = 0
-        self.urg = 0; self.psh = 0; self.fin = 0
-        self.ece = 0; self.cwr = 0
+        self.syn = 0
+        self.ack = 0
+        self.rst = 0
+        self.urg = 0
+        self.psh = 0
+        self.fin = 0
+        self.ece = 0
+        self.cwr = 0
 
         # Protocol flags
-        self.is_tcp = False; self.is_udp = False; self.is_icmp = False
-        self.is_arp = False; self.is_ipv4 = False; self.is_llc = False
-        self.is_http = False; self.is_https = False; self.is_dns = False
-        self.is_telnet = False; self.is_smtp = False; self.is_ssh = False
-        self.is_irc = False; self.is_dhcp = False
+        self.is_tcp = False
+        self.is_udp = False
+        self.is_icmp = False
+        self.is_arp = False
+        self.is_ipv4 = False
+        self.is_llc = False
+        self.is_http = False
+        self.is_https = False
+        self.is_dns = False
+        self.is_telnet = False
+        self.is_smtp = False
+        self.is_ssh = False
+        self.is_irc = False
+        self.is_dhcp = False
         self.protocol_type = 0
 
         # Frame / TCP detail lists
@@ -152,17 +184,34 @@ class Flow:
         self.init_win_bytes_fwd = None
 
         # MQTT accumulators
-        self.mqtt_msgtype = []; self.mqtt_qos = []
-        self.mqtt_dupflag = []; self.mqtt_retain = []
-        self.mqtt_len = [];     self.mqtt_topic_len = []
+        self.mqtt_msgtype = []
+        self.mqtt_qos = []
+        self.mqtt_dupflag = []
+        self.mqtt_retain = []
+        self.mqtt_len = []
+        self.mqtt_topic_len = []
 
         # Track last TCP packet time for tcp.time_delta
         self._last_tcp_time = None
 
+<<<<<<< HEAD
+        # Export state tracking
+        self.exported_once = False
+        self.packet_count_at_last_export = 0
+        self.tcp_completed = False
+
+        # New features (61-65)
+        self.gre_inner_protocols = []   # inner proto numbers seen inside GRE packets
+        self.ip_lengths = []            # ip.len values (IP total length field)
+        self.payload_sizes = []         # TCP/UDP application payload bytes per packet
+
+        # New features (66-70) are computed from existing accumulators — no new lists needed
+=======
         # Export state tracking, hybrid export logic to prevents duplicate exports
         self.exported_once = False           # True after first export
-        self.packet_count_at_last_export = 0 # Packet count snapshot at last export
+        self.packet_count_at_last_export = 0  # Packet count snapshot at last export
         self.tcp_completed = False           # True if FIN or RST seen (flow is done)
+>>>>>>> ef16f59a23004139291d6de6d6e38ae6f7d05b4b
 
     def update(self, pkt, timestamp):
         """Update flow with a new packet."""
@@ -170,9 +219,14 @@ class Flow:
         self.packet_times.append(timestamp)
 
         if IP not in pkt:
+<<<<<<< HEAD
+=======
             # Check non-IP layers
-            if pkt.haslayer('ARP'): self.is_arp = True
-            if pkt.haslayer('LLC'): self.is_llc = True
+>>>>>>> ef16f59a23004139291d6de6d6e38ae6f7d05b4b
+            if pkt.haslayer('ARP'):
+                self.is_arp = True
+            if pkt.haslayer('LLC'):
+                self.is_llc = True
             return
 
         ip = pkt[IP]
@@ -185,78 +239,100 @@ class Flow:
         self.ttl_values.append(ip.ttl)
         self.ip_header_lengths.append(ip_hdr_len)
         self.frame_lengths.append(pkt_len)
+        self.ip_lengths.append(ip.len)
 
-        # frame.cap_len (wirelen if available, else pkt_len)
         wl = getattr(pkt, 'wirelen', None)
         self.frame_cap_lengths.append(wl if wl is not None else pkt_len)
 
-        # frame.time_delta
         if len(self.packet_times) > 1:
             self.frame_time_deltas.append(timestamp - self.packet_times[-2])
 
-        # Direction
         is_fwd = (ip.src == self.initiator_ip)
         if is_fwd:
-            self.fwd_pkts += 1; self.fwd_bytes += pkt_len
+            self.fwd_pkts += 1
+            self.fwd_bytes += pkt_len
             self.fwd_lengths.append(pkt_len)
             self.fwd_packet_times.append(timestamp)
         else:
-            self.bwd_pkts += 1; self.bwd_bytes += pkt_len
+            self.bwd_pkts += 1
+            self.bwd_bytes += pkt_len
             self.bwd_lengths.append(pkt_len)
             self.bwd_packet_times.append(timestamp)
 
-        # Capture initial window (first packet only)
         if self.init_win_bytes_fwd is None and TCP in pkt:
             self.init_win_bytes_fwd = pkt[TCP].window
 
-        # ---- TCP ----
+        # GRE
+        if ip.proto == PROTOCOL_GRE and GRE in pkt:
+            gre = pkt[GRE]
+            if IP in gre:
+                self.gre_inner_protocols.append(gre[IP].proto)
+            else:
+                self.gre_inner_protocols.append(0)
+
+        # TCP
         if TCP in pkt:
             self.is_tcp = True
             tcp = pkt[TCP]
-            self.tcp_lengths.append(len(tcp.payload) if tcp.payload else 0)
+            tcp_payload_len = len(tcp.payload) if tcp.payload else 0
+            self.tcp_lengths.append(tcp_payload_len)
+            self.payload_sizes.append(tcp_payload_len)
             self.tcp_window_sizes.append(tcp.window)
             f = int(tcp.flags)
             self.tcp_flags_values.append(f)
 
-            if f & TCP_SYN: self.syn += 1
-            if f & TCP_ACK: self.ack += 1
-            if f & TCP_RST: self.rst += 1
-            if f & TCP_PSH: self.psh += 1
-            if f & TCP_URG: self.urg += 1
-            if f & TCP_FIN: self.fin += 1
-            if f & TCP_ECE: self.ece += 1
-            if f & TCP_CWR: self.cwr += 1
+            if f & TCP_SYN:
+                self.syn += 1
+            if f & TCP_ACK:
+                self.ack += 1
+            if f & TCP_RST:
+                self.rst += 1
+            if f & TCP_PSH:
+                self.psh += 1
+            if f & TCP_URG:
+                self.urg += 1
+            if f & TCP_FIN:
+                self.fin += 1
+            if f & TCP_ECE:
+                self.ece += 1
+            if f & TCP_CWR:
+                self.cwr += 1
 
-            # Mark flow as completed if FIN or RST seen
             if f & (TCP_FIN | TCP_RST):
                 self.tcp_completed = True
 
-            # tcp.time_delta
             if self._last_tcp_time is not None:
                 self.tcp_time_deltas.append(timestamp - self._last_tcp_time)
             self._last_tcp_time = timestamp
 
-            # Protocol detection by port
             if Config.ENABLE_PROTOCOL_DETECTION:
                 self._detect_app_protocol(tcp.sport, tcp.dport, pkt)
 
-        # ---- UDP ----
+        # UDP
         elif UDP in pkt:
             self.is_udp = True
+            udp = pkt[UDP]
+            self.payload_sizes.append(len(udp.payload) if udp.payload else 0)
             if Config.ENABLE_PROTOCOL_DETECTION:
-                udp = pkt[UDP]
                 for p in (udp.sport, udp.dport):
                     proto = APP_PORTS.get(p)
-                    if proto == "DNS": self.is_dns = True
-                    elif proto == "DHCP": self.is_dhcp = True
+                    if proto == "DNS":
+                        self.is_dns = True
+                    elif proto == "DHCP":
+                        self.is_dhcp = True
 
-        # ---- ICMP ----
+        # ICMP
         elif ICMP in pkt:
             self.is_icmp = True
 
+<<<<<<< HEAD
+=======
         # Non-IP layers
-        if pkt.haslayer('ARP'): self.is_arp = True
-        if pkt.haslayer('LLC'): self.is_llc = True
+>>>>>>> ef16f59a23004139291d6de6d6e38ae6f7d05b4b
+        if pkt.haslayer('ARP'):
+            self.is_arp = True
+        if pkt.haslayer('LLC'):
+            self.is_llc = True
 
     def _detect_app_protocol(self, sport, dport, pkt):
         """Detect application-layer protocol by port and parse MQTT if found."""
@@ -264,14 +340,22 @@ class Flow:
             proto = APP_PORTS.get(port)
             if not proto:
                 continue
-            if   proto == "HTTP":    self.is_http = True
-            elif proto == "HTTPS":   self.is_https = True
-            elif proto == "DNS":     self.is_dns = True
-            elif proto == "Telnet":  self.is_telnet = True
-            elif proto == "SMTP":    self.is_smtp = True
-            elif proto == "SSH":     self.is_ssh = True
-            elif proto == "IRC":     self.is_irc = True
-            elif proto == "DHCP":    self.is_dhcp = True
+            if proto == "HTTP":
+                self.is_http = True
+            elif proto == "HTTPS":
+                self.is_https = True
+            elif proto == "DNS":
+                self.is_dns = True
+            elif proto == "Telnet":
+                self.is_telnet = True
+            elif proto == "SMTP":
+                self.is_smtp = True
+            elif proto == "SSH":
+                self.is_ssh = True
+            elif proto == "IRC":
+                self.is_irc = True
+            elif proto == "DHCP":
+                self.is_dhcp = True
             elif proto == "MQTT":
                 if Config.ENABLE_MQTT_PARSING and Raw in pkt:
                     m = MQTTParser.parse(bytes(pkt[Raw]))
@@ -290,82 +374,111 @@ class Flow:
         total_bytes = self.fwd_bytes + self.bwd_bytes
 
         def sdiv(a, b): return a / b if b else 0.0
-        def avg(lst):   return float(np.mean(lst)) if lst else 0.0
-        def std(lst):   return float(np.std(lst))  if lst else 0.0
-        def var(lst):   return float(np.var(lst))   if lst else 0.0
-        def mn(lst):    return float(np.min(lst))   if lst else 0.0
-        def mx(lst):    return float(np.max(lst))   if lst else 0.0
-        def sm(lst):    return float(np.sum(lst))    if lst else 0.0
+        def avg(lst): return float(np.mean(lst)) if lst else 0.0
+        def std(lst): return float(np.std(lst)) if lst else 0.0
+        def var(lst): return float(np.var(lst)) if lst else 0.0
+        def mn(lst): return float(np.min(lst)) if lst else 0.0
+        def mx(lst): return float(np.max(lst)) if lst else 0.0
+        def sm(lst): return float(np.sum(lst)) if lst else 0.0
 
-        # IATs
         iats = list(np.diff(self.packet_times)) if len(self.packet_times) > 1 else []
 
+        frame_time_delta_bin = int(
+            any(d > Config.FRAME_TIME_DELTA_BIN_THRESHOLD for d in self.frame_time_deltas)
+        )
+
         features = {
-            # Flow metrics
+            # Flow metrics (0-2)
             0: duration,
             1: sdiv(total_pkts, dur_s),
             2: sdiv(total_bytes, dur_s),
 
-            # TCP flag counts
+            # TCP flag counts (3-9)
             3: self.syn, 4: self.ack, 5: self.rst,
             6: self.urg, 7: self.psh, 8: self.fin,
             9: avg(self.tcp_flags_values),
 
+<<<<<<< HEAD
+            # Protocol binary flags (10-23)
+=======
             # Protocol binary flags
-            10: int(self.is_tcp),    11: int(self.is_udp),    12: int(self.is_icmp),
-            13: int(self.is_arp),    14: int(self.is_dns),    15: int(self.is_http),
-            16: int(self.is_https),  17: int(self.is_telnet), 18: int(self.is_smtp),
-            19: int(self.is_ssh),    20: int(self.is_irc),    21: int(self.is_dhcp),
-            22: int(self.is_ipv4),   23: int(self.is_llc),
+>>>>>>> ef16f59a23004139291d6de6d6e38ae6f7d05b4b
+            10: int(self.is_tcp), 11: int(self.is_udp), 12: int(self.is_icmp),
+            13: int(self.is_arp), 14: int(self.is_dns), 15: int(self.is_http),
+            16: int(self.is_https), 17: int(self.is_telnet), 18: int(self.is_smtp),
+            19: int(self.is_ssh), 20: int(self.is_irc), 21: int(self.is_dhcp),
+            22: int(self.is_ipv4), 23: int(self.is_llc),
 
-            # IP protocol number
+            # IP protocol number (24)
             24: self.protocol_type,
 
-            # Packet size stats
+            # Packet size stats (25-26)
             25: avg(self.frame_lengths),
             26: var(self.frame_lengths),
 
+<<<<<<< HEAD
+            # Counts (27-32)
+=======
             # Counts
-            27: total_pkts,          28: total_bytes,
-            29: self.fwd_pkts,       30: self.bwd_pkts,
-            31: self.fwd_bytes,      32: self.bwd_bytes,
+>>>>>>> ef16f59a23004139291d6de6d6e38ae6f7d05b4b
+            27: total_pkts, 28: total_bytes,
+            29: self.fwd_pkts, 30: self.bwd_pkts,
+            31: self.fwd_bytes, 32: self.bwd_bytes,
 
-            # Directional means
+            # Directional means (33-34)
             33: sdiv(self.fwd_bytes, self.fwd_pkts),
             34: sdiv(self.bwd_bytes, self.bwd_pkts),
 
-            # Aggregate sizes
+            # Aggregate sizes (35-38)
             35: sm(self.frame_lengths),
             36: total_bytes,
             37: avg(self.frame_lengths),
             38: std(self.frame_lengths),
 
-            # IAT
+            # IAT (39-43)
             39: avg(iats), 40: std(iats), 41: mn(iats), 42: mx(iats), 43: sm(iats),
 
-            # Frame / TCP time deltas
+            # Frame / TCP time deltas (44-45)
             44: avg(self.frame_time_deltas),
             45: avg(self.tcp_time_deltas),
 
-            # Frame / TCP metrics
+            # Frame / TCP metrics (46-49)
             46: avg(self.tcp_lengths),
             47: avg(self.frame_lengths),
             48: avg(self.frame_cap_lengths),
             49: avg(self.tcp_window_sizes),
 
+<<<<<<< HEAD
+            # MQTT (50-55)
+=======
             # MQTT
-            50: avg(self.mqtt_msgtype),   51: avg(self.mqtt_qos),
-            52: avg(self.mqtt_dupflag),   53: avg(self.mqtt_retain),
-            54: avg(self.mqtt_len),       55: avg(self.mqtt_topic_len),
+>>>>>>> ef16f59a23004139291d6de6d6e38ae6f7d05b4b
+            50: avg(self.mqtt_msgtype), 51: avg(self.mqtt_qos),
+            52: avg(self.mqtt_dupflag), 53: avg(self.mqtt_retain),
+            54: avg(self.mqtt_len), 55: avg(self.mqtt_topic_len),
 
-            # IP metadata
+            # IP metadata (56-58)
             56: avg(self.ttl_values),
             57: avg(self.ip_header_lengths),
             58: self.init_win_bytes_fwd if self.init_win_bytes_fwd is not None else 0,
 
-            # IPs
+            # IPs (59-60)
             59: self.flow_key[0],
             60: self.flow_key[1],
+
+            # New features round 1 (61-65)
+            61: avg(self.gre_inner_protocols),        # gre_inner_protocol
+            62: sdiv(self.fwd_pkts, self.bwd_pkts),   # fwd_bwd_ratio
+            63: frame_time_delta_bin,                 # frame_time_delta_bin
+            64: avg(self.ip_lengths),                 # ip_len
+            65: avg(self.payload_sizes),              # payload_size
+
+            # New features round 2 (66-70) — DoS model
+            66: mx(self.frame_lengths),               # Max (max frame size)
+            67: mn(self.frame_lengths),               # Min (min frame size)
+            68: sdiv(self.psh, total_pkts),           # psh_flag_number (ratio)
+            69: sdiv(self.syn, total_pkts),           # syn_flag_number (ratio)
+            70: sdiv(self.ack, total_pkts),           # ack_flag_number (ratio)
         }
 
         # Round floats
@@ -430,7 +543,6 @@ class MQTTPublisher:
         try:
             self.client.connect(Config.MQTT_BROKER, Config.MQTT_PORT, Config.MQTT_KEEPALIVE)
             self.client.loop_start()
-            # Wait up to 5s for connection
             deadline = time.time() + 5
             while not self.is_connected and time.time() < deadline:
                 time.sleep(0.1)
@@ -488,6 +600,7 @@ class MQTTPublisher:
             'success_rate': (self.publish_count / max(total, 1)) * 100
         }
 
+
 class FlowManager:
     """Manages active flows, periodic export, and cleanup."""
 
@@ -506,8 +619,10 @@ class FlowManager:
             return None
         src, dst, proto = pkt[IP].src, pkt[IP].dst, pkt[IP].proto
         sp, dp = 0, 0
-        if TCP in pkt:   sp, dp = pkt[TCP].sport, pkt[TCP].dport
-        elif UDP in pkt: sp, dp = pkt[UDP].sport, pkt[UDP].dport
+        if TCP in pkt:
+            sp, dp = pkt[TCP].sport, pkt[TCP].dport
+        elif UDP in pkt:
+            sp, dp = pkt[UDP].sport, pkt[UDP].dport
 
         if (src, sp) < (dst, dp):
             return (src, dst, sp, dp, proto)
@@ -526,30 +641,28 @@ class FlowManager:
             if not key:
                 return
 
-            # Create new flow if needed
             if key not in self.flows:
                 if len(self.flows) >= Config.MAX_FLOWS:
                     logger.warning(f"Max flows ({Config.MAX_FLOWS}) reached, forcing cleanup")
                     self._cleanup(force=True)
 
                 flow = Flow(flow_key=key)
-                # Set initiator from first packet
                 if IP in pkt:
                     flow.initiator_ip = pkt[IP].src
-                    if TCP in pkt:   flow.initiator_port = pkt[TCP].sport
-                    elif UDP in pkt: flow.initiator_port = pkt[UDP].sport
+                    if TCP in pkt:
+                        flow.initiator_port = pkt[TCP].sport
+                    elif UDP in pkt:
+                        flow.initiator_port = pkt[UDP].sport
                 self.flows[key] = flow
                 self.flow_count += 1
                 logger.info(f"New flow: {key[0]}:{key[2]} <-> {key[1]}:{key[3]} proto={key[4]} (total={self.flow_count})")
 
             self.flows[key].update(pkt, now)
 
-            # Periodic cleanup
             if now - self.last_cleanup > Config.CLEANUP_INTERVAL:
                 self._cleanup()
                 self.last_cleanup = now
 
-            # Periodic export
             if now - self.last_export >= Config.FLOW_EXPORT_INTERVAL:
                 self.export_flows()
                 self.last_export = now
@@ -570,16 +683,13 @@ class FlowManager:
             if force or inactivity > Config.FLOW_TIMEOUT:
                 expired_keys.append(key)
             elif age > Config.FLOW_MAX_AGE:
-                # Hard age cap hit — export before evicting
                 age_capped_keys.append(key)
 
-        # Export age-capped flows as final before removing
         if age_capped_keys:
             self._export_specific_flows(age_capped_keys, export_reason="age_cap", is_final=True)
             for key in age_capped_keys:
                 del self.flows[key]
 
-        # Remove expired flows (already exported or inactive)
         for key in expired_keys:
             del self.flows[key]
 
@@ -621,10 +731,8 @@ class FlowManager:
                     if self.mqtt.is_connected:
                         self.mqtt.publish_flow(flow_data)
 
-                    # Update export state on the flow
                     flow.exported_once = True
                     flow.packet_count_at_last_export = current_pkt_count
-
                     exported += 1
 
             if flows_for_batch and self.mqtt.is_connected:
@@ -639,38 +747,29 @@ class FlowManager:
         if not self.flows:
             return
 
-        # Categorize flows into buckets
-        first_export_keys = []      # Never exported before
-        new_packets_keys = []       # Has new packets since last export
-        completed_keys = []         # TCP FIN/RST seen
+        first_export_keys = []
+        new_packets_keys = []
+        completed_keys = []
 
         for key, flow in list(self.flows.items()):
             current_pkt_count = flow.fwd_pkts + flow.bwd_pkts
 
-            # Check if TCP completed
             if flow.tcp_completed and flow.is_tcp:
                 completed_keys.append(key)
-            # Check if never exported
             elif not flow.exported_once:
                 first_export_keys.append(key)
-            # Check if has new packets
             elif current_pkt_count > flow.packet_count_at_last_export:
                 new_packets_keys.append(key)
-            # else: unchanged — skip (this prevents duplicates!)
 
-        # Export each category
         self._export_specific_flows(first_export_keys, export_reason="first", is_final=False)
         self._export_specific_flows(new_packets_keys, export_reason="new_packets", is_final=False)
         self._export_specific_flows(completed_keys, export_reason="completed", is_final=True)
 
-        # Evict completed flows
         for key in completed_keys:
             if key in self.flows:
                 del self.flows[key]
 
-        # Log summary
         total_exported = len(first_export_keys) + len(new_packets_keys) + len(completed_keys)
-        skipped = len(self.flows) - total_exported + len(completed_keys)  # flows still active but not exported
         mq = self.mqtt.stats()
         logger.info(
             f"Exported {total_exported} flows (first={len(first_export_keys)}, new={len(new_packets_keys)}, "
@@ -689,7 +788,7 @@ class FlowManager:
 
 def main():
     logger.info("=" * 70)
-    logger.info("IoT Security Feature Extractor (61 Features)")
+    logger.info("IoT Security Feature Extractor (71 Features)")
     logger.info("=" * 70)
     logger.info(f"Interface: {Config.INTERFACE}")
     logger.info(f"Flow timeout: {Config.FLOW_TIMEOUT}s | Export interval: {Config.FLOW_EXPORT_INTERVAL}s")
@@ -719,14 +818,11 @@ def main():
         logger.info("SHUTTING DOWN")
         logger.info("=" * 70)
 
-        # Final export
         fm.export_flows()
 
-        # Disconnect MQTT
         if Config.MQTT_ENABLED:
             fm.mqtt.disconnect()
 
-        # Print stats
         s = fm.get_stats()
         mq = fm.mqtt.stats()
         logger.info(f"  Packets processed: {s['total_packets']}")
@@ -750,3 +846,4 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         Config.INTERFACE = sys.argv[1]
     main()
+

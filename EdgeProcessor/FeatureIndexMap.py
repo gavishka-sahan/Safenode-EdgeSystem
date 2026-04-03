@@ -146,6 +146,7 @@ def validate_indices(indices: List[int]) -> bool:
 
 def get_feature_indices_for_model(model_name: str) -> List[int]:
     MODEL_FEATURES = {
+<<<<<<< HEAD
         # REPLAY ATTACK (13 features)
         # frame_time_delta_bin→63, frame_len→47, ip_len→64, ip_ttl→56,
         # ip_header_len→57, tcp_window→49, tcp_flag_syn→3, tcp_flag_rst→5,
@@ -174,6 +175,29 @@ def get_feature_indices_for_model(model_name: str) -> List[int]:
         # tcp.window_size_value→49, pkt_size_avg→25, ARP→13,
         # DNS→14, proto→24, fwd_packet_count→29, bwd_packet_count→30
         'spoof': [56, 3, 4, 5, 39, 40, 1, 0, 49, 25, 13, 14, 24, 29, 30],
+=======
+        # MIRAI BOTNET
+        'mirai': [
+            0, 0, 1, 3, 6, 5, 15, 16, 14, 17, 18, 19, 20, 10, 11, 21, 13, 12,
+        ],
+
+        # DOS ATTACK
+        'dos': [
+            1, 2, 25, 24, 9, 3, 4, 5, 39, 40,
+        ],
+
+        # SPOOFING
+        'spoof': [
+            # 13,14,23,0,1,43,35,36,37,38,4,3,10,11,12,22,
+            56, 24, 49, 58, 57, 3, 5, 4, 13, 14, 40, 8, 7, 10, 11,
+        ],
+
+        # REPLAY ATTACK
+        'replay': [
+            # 44,45,46,47,48,49,9,50,51,52,53,54,55,24,
+            52, 58, 40, 39, 26, 49, 5, 3, 56, 54,
+        ],
+>>>>>>> 39b4fb0d88c3de73e728e15bc44adaf370f2962b
     }
 
     return MODEL_FEATURES.get(model_name.lower(), [])
@@ -183,8 +207,13 @@ def get_model_info(model_name: str) -> Dict:
     MODEL_INFO = {
         'mirai': {
             'full_name': 'Mirai Botnet Detection',
+<<<<<<< HEAD
             'attack_types': ['Mirai-greeth_flood', 'Mirai-greip_flood', 'Mirai-udpplain'],
             'feature_count': 19,
+=======
+            'attack_types': ['Mirai DDoS', 'Port Scanning', 'Telnet Brute Force'],
+            'feature_count': 0,
+>>>>>>> 39b4fb0d88c3de73e728e15bc44adaf370f2962b
             'model_file': 'mirai_model.onnx',
             'requires_scaler': False,
             'accuracy': 0.9999,
@@ -200,7 +229,11 @@ def get_model_info(model_name: str) -> Dict:
         'replay': {
             'full_name': 'Replay Attack Detection',
             'attack_types': ['Replay Attack', 'MQTT Replay'],
+<<<<<<< HEAD
             'feature_count': 13,
+=======
+            'feature_count': 0,
+>>>>>>> 39b4fb0d88c3de73e728e15bc44adaf370f2962b
             'model_file': 'replay_model.onnx',
             'requires_scaler': True,
             'dataset': 'Teammate dataset',
@@ -208,7 +241,11 @@ def get_model_info(model_name: str) -> Dict:
         'dos': {
             'full_name': 'DoS Attack Detection',
             'attack_types': ['DDoS', 'SYN Flood', 'UDP Flood'],
+<<<<<<< HEAD
             'feature_count': 18,
+=======
+            'feature_count': 0,
+>>>>>>> 39b4fb0d88c3de73e728e15bc44adaf370f2962b
             'model_file': 'dos_model.onnx',
             'requires_scaler': True,
             'dataset': 'Teammate dataset',
@@ -216,7 +253,11 @@ def get_model_info(model_name: str) -> Dict:
         'spoof': {
             'full_name': 'Sniffing/Spoofing Detection',
             'attack_types': ['ARP Spoofing', 'DNS Spoofing', 'MAC Spoofing'],
+<<<<<<< HEAD
             'feature_count': 15,
+=======
+            'feature_count': 0,
+>>>>>>> 39b4fb0d88c3de73e728e15bc44adaf370f2962b
             'model_file': 'spoof_model.onnx',
             'requires_scaler': False,
             'dataset': 'CICIoT2023',
@@ -254,11 +295,22 @@ if __name__ == "__main__":
         if validate_indices(indices):
             print(f"  Validation: ALL INDICES VALID (0-{TOTAL_FEATURES - 1})")
         else:
+<<<<<<< HEAD
             print("  Validation: ERROR — invalid indices detected!")
 
         print("  Features used:")
         for idx in indices:
             print(f"    [{idx:2d}] {get_feature_name(idx)}")
+=======
+            print("  ERROR: Invalid indices detected!")
+
+        if len(indices) > 0:
+            print("  Features used:")
+            for idx in indices[:10]:
+                print(f"    [{idx:2d}] {get_feature_name(idx)}")
+            if len(indices) > 10:
+                print(f"    ... and {len(indices) - 10} more")
+>>>>>>> 39b4fb0d88c3de73e728e15bc44adaf370f2962b
 
     print("\n" + "=" * 80)
     print("COVERAGE SUMMARY")

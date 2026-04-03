@@ -412,7 +412,7 @@ def parse_vlan(vlan_raw):
         return 0
     try:
         return int(vlan_raw)
-    except:
+    except BaseException:
         return 1
 
 
@@ -606,7 +606,7 @@ def check_and_execute_isolations(conn, db_ports, switch_ports):
         iso_ports = {k: v.get("status") for k, v in db_ports.items() if v.get("status") == "isolated"}
         if iso_ports:
             log.info(f"  [ISO CHECK] Isolated ports in DB: {iso_ports}")
-            log.info(f"  [ISO CHECK] Switch VLAN map: { {k: v['vlan'] for k, v in switch_vlan_map.items()} }")
+            log.info("  [ISO CHECK] Switch VLAN map: " + str({k: v['vlan'] for k, v in switch_vlan_map.items()}))
 
     for port_num, db_port in db_ports.items():
         db_status = db_port.get("status")
@@ -669,7 +669,7 @@ def poll_switch(conn):
     log.info("  Running ARP refresh ping sweep...")
     try:
         conn.send_command("ping 192.168.8.255 repeat 1 timeout 1", read_timeout=10)
-    except:
+    except BaseException:
         pass  # Broadcast ping may fail but still populates ARP
 
     arp_out = cmd(conn, "show ip arp")
@@ -809,7 +809,7 @@ def main():
                 if conn:
                     try:
                         conn.disconnect()
-                    except:
+                    except BaseException:
                         pass
                 conn = connect_to_switch()
                 if not conn:
