@@ -9,9 +9,9 @@ import paho.mqtt.client as mqtt
 
 BROKER = "192.168.8.135"
 PORT = 1883
-TOPIC = "health/log"
-INTERFACE = "wlan0"             # Network interface to monitor
-INTERVAL = 10                   # Seconds between health reports
+TOPIC = "FlowExtractor/SystemStat"
+INTERFACE = "wlan0"
+INTERVAL = 10                   # Seconds between health report
 
 
 # Processes to monitor (key services on Feature Extractor Pi)

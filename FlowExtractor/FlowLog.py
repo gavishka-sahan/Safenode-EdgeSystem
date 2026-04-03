@@ -26,7 +26,7 @@ class Config:
     LOG_FILE = "/opt/FlowExtractor/feature_extractor.log"
     MQTT_BROKER = "192.168.8.135"
     MQTT_PORT = 1883
-    MQTT_TOPIC = "metadata/log"
+    MQTT_TOPIC = "FlowExtractor/log"
     MQTT_CLIENT_ID = f"log_parser_{uuid.uuid4().hex[:8]}"
     MQTT_QOS = 0
 
