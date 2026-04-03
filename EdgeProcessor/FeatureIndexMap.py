@@ -62,7 +62,7 @@ FEATURE_NAMES: Dict[int, str] = {
     40: "iat_std",                # iat_variance
     41: "min_iat",
     42: "max_iat",
-    43: "IAT",                    # total inter-arrival time
+    43: "IAT",                    # total inter-arrival time (sum)
 
     # Frame and TCP Time Deltas (44-45)
     44: "frame.time_delta",
@@ -90,10 +90,24 @@ FEATURE_NAMES: Dict[int, str] = {
     # Source and Destination IPs (59-60)
     59: "source_IP",
     60: "Destination_IP",
+
+    # New Features Round 1 (61-65)
+    61: "gre_inner_protocol",     # avg inner protocol number inside GRE packets
+    62: "fwd_bwd_ratio",          # fwd_packet_count / bwd_packet_count
+    63: "frame_time_delta_bin",   # 1 if any frame_time_delta > threshold, else 0
+    64: "ip_len",                 # avg ip.len (IP total length field)
+    65: "payload_size",           # avg TCP/UDP application payload bytes
+
+    # New Features Round 2 (66-70) — DoS model
+    66: "Max",                    # max frame size in bytes
+    67: "Min",                    # min frame size in bytes
+    68: "psh_flag_number",        # ratio of PSH flagged packets
+    69: "syn_flag_number",        # ratio of SYN flagged packets
+    70: "ack_flag_number",        # ratio of ACK flagged packets
 }
 
 # Total number of features in the system
-TOTAL_FEATURES = 61
+TOTAL_FEATURES = 71
 
 
 def get_feature_name(index: int) -> str:
@@ -126,33 +140,40 @@ def convert_named_to_indexed(named_features: dict) -> dict:
 
 
 def validate_indices(indices: List[int]) -> bool:
-    """Validate that all indices are within valid range (0-60)"""
-    return all(0 <= idx <= 60 for idx in indices)
+    """Validate that all indices are within valid range (0-70)"""
+    return all(0 <= idx <= 70 for idx in indices)
 
 
 def get_feature_indices_for_model(model_name: str) -> List[int]:
     MODEL_FEATURES = {
-        # MIRAI BOTNET 
-        'mirai': [
-            0,0,1,3,6,5,15,16,14,17,18,19,20,10,11,21,13,12,
-        ],
+        # REPLAY ATTACK (13 features)
+        # frame_time_delta_bin→63, frame_len→47, ip_len→64, ip_ttl→56,
+        # ip_header_len→57, tcp_window→49, tcp_flag_syn→3, tcp_flag_rst→5,
+        # tcp_flag_fin→8, tcp_flag_ack→4, tcp_flag_psh→7, payload_size→65,
+        # mqtt_dupflag→52
+        'replay': [63, 47, 64, 56, 57, 49, 3, 5, 8, 4, 7, 65, 52],
 
-        # DOS ATTACK 
-        'dos': [
-            1,2,25,24,9,3,4,5,39,40,
-        ],
+        # DOS ATTACK (18 features)
+        # IAT→43, Rate→1, Max→66, psh_flag_number→68, TCP→10,
+        # Std→38, Variance→26, UDP→11, AVG→37, Tot_size→35,
+        # syn_flag_number→69, ack_flag_number→70, syn_count→3,
+        # HTTP→15, rst_count→5, ICMP→12, fin_count→8, Min→67
+        'dos': [43, 1, 66, 68, 10, 38, 26, 11, 37, 35, 69, 70, 3, 15, 5, 12, 8, 67],
 
-        # SPOOFING
-        'spoof': [
-            #13,14,23,0,1,43,35,36,37,38,4,3,10,11,12,22,
-            56,24,49,58,57,3,5,4,13,14,40,8,7,10,11,
-        ],
+        # MIRAI BOTNET (19 features)
+        # flow_duration→0, rate→1, syn_count→3, rst_count→5,
+        # HTTP→15, HTTPS→16, DNS→14, SSH→19, IRC→20, TCP→10,
+        # UDP→11, DHCP→21, ICMP→12, avg_packet_size→25,
+        # inter_arrival_std→40, fin_count→8, gre_inner_protocol→61,
+        # fwd_bwd_ratio→62, pkt_size_variance→26
+        'mirai': [0, 1, 3, 5, 15, 16, 14, 19, 20, 10, 11, 21, 12, 25, 40, 8, 61, 62, 26],
 
-        # REPLAY ATTACK
-        'replay': [
-            #44,45,46,47,48,49,9,50,51,52,53,54,55,24,
-            52,58,40,39,26,49,5,3,56,54,
-        ],
+        # SPOOFING (15 features)
+        # ttl_value→56, syn_count→3, ack_count→4, rst_count→5,
+        # iat_mean→39, iat_std→40, rate→1, flow_duration→0,
+        # tcp.window_size_value→49, pkt_size_avg→25, ARP→13,
+        # DNS→14, proto→24, fwd_packet_count→29, bwd_packet_count→30
+        'spoof': [56, 3, 4, 5, 39, 40, 1, 0, 49, 25, 13, 14, 24, 29, 30],
     }
 
     return MODEL_FEATURES.get(model_name.lower(), [])
@@ -162,51 +183,44 @@ def get_model_info(model_name: str) -> Dict:
     MODEL_INFO = {
         'mirai': {
             'full_name': 'Mirai Botnet Detection',
-            'attack_types': ['Mirai DDoS', 'Port Scanning', 'Telnet Brute Force'],
-            'feature_count': 0, 
+            'attack_types': ['Mirai-greeth_flood', 'Mirai-greip_flood', 'Mirai-udpplain'],
+            'feature_count': 19,
             'model_file': 'mirai_model.onnx',
             'requires_scaler': False,
             'accuracy': 0.9999,
             'inference_time_ms': 1.71,
-            'dataset': 'bornpresident/mirai_botnet (Hugging Face)',
+            'dataset': 'CICIoT2023',
             'classes': {
                 0: 'BenignTraffic',
                 1: 'Mirai-greeth_flood',
                 2: 'Mirai-greip_flood',
                 3: 'Mirai-udpplain'
             },
-            'primary_indicators': [
-                'UDP protocol (63.3% importance for DDoS floods)',
-                'Telnet port (23) - primary infection vector',
-                'High packet rate with small packets',
-                'TCP flag patterns (SYN scanning)',
-            ]
         },
         'replay': {
             'full_name': 'Replay Attack Detection',
             'attack_types': ['Replay Attack', 'MQTT Replay'],
-            'feature_count': 0,  
+            'feature_count': 13,
             'model_file': 'replay_model.onnx',
-            'model_format': 'XGBoost JSON',
             'requires_scaler': True,
-            'dataset': 'Teammate dataset'
+            'dataset': 'Teammate dataset',
         },
         'dos': {
             'full_name': 'DoS Attack Detection',
             'attack_types': ['DDoS', 'SYN Flood', 'UDP Flood'],
-            'feature_count': 0,  
+            'feature_count': 18,
             'model_file': 'dos_model.onnx',
             'requires_scaler': True,
             'dataset': 'Teammate dataset',
         },
-        'sniffing': {
+        'spoof': {
             'full_name': 'Sniffing/Spoofing Detection',
             'attack_types': ['ARP Spoofing', 'DNS Spoofing', 'MAC Spoofing'],
-            'feature_count': 0,  
+            'feature_count': 15,
             'model_file': 'spoof_model.onnx',
             'requires_scaler': False,
-            'dataset': 'CIC IoT Dataset 2023',
-        }
+            'dataset': 'CICIoT2023',
+        },
     }
 
     return MODEL_INFO.get(model_name.lower(), {})
@@ -214,7 +228,7 @@ def get_model_info(model_name: str) -> Dict:
 
 if __name__ == "__main__":
     print("=" * 80)
-    print(f"FEATURE INDEX MAPPING SYSTEM - v6.0 ({TOTAL_FEATURES} Features)")
+    print(f"FEATURE INDEX MAPPING SYSTEM - v8.0 ({TOTAL_FEATURES} Features)")
     print("=" * 80)
 
     print(f"\nTotal Features: {TOTAL_FEATURES}")
@@ -228,36 +242,34 @@ if __name__ == "__main__":
     print("MODEL FEATURE REQUIREMENTS")
     print("=" * 80)
 
-    for model in ['mirai', 'replay', 'dos', 'sniffing']:
+    for model in ['mirai', 'replay', 'dos', 'spoof']:
         indices = get_feature_indices_for_model(model)
         info = get_model_info(model)
 
         print(f"\n{model.upper()} Model - {info.get('full_name', 'Unknown')}:")
-        print(f"  Model file: {info.get('model_file', 'unknown')}")
-        print(f"  Requires {len(indices)} features")
+        print(f"  Model file:      {info.get('model_file', 'unknown')}")
+        print(f"  Feature count:   {len(indices)}")
         print(f"  Feature indices: {indices}")
 
         if validate_indices(indices):
-            print(f"  All indices valid (0-{TOTAL_FEATURES - 1})")
+            print(f"  Validation: ALL INDICES VALID (0-{TOTAL_FEATURES - 1})")
         else:
-            print(f"  ERROR: Invalid indices detected!")
+            print("  Validation: ERROR — invalid indices detected!")
 
-        if len(indices) > 0:
-            print(f"  Features used:")
-            for idx in indices[:10]:
-                print(f"    [{idx:2d}] {get_feature_name(idx)}")
-            if len(indices) > 10:
-                print(f"    ... and {len(indices) - 10} more")
+        print("  Features used:")
+        for idx in indices:
+            print(f"    [{idx:2d}] {get_feature_name(idx)}")
 
     print("\n" + "=" * 80)
-    print("VALIDATION COMPLETE")
+    print("COVERAGE SUMMARY")
     print("=" * 80)
 
     all_features_used = set()
-    for model in ['mirai', 'replay', 'dos', 'sniffing']:
-        indices = get_feature_indices_for_model(model)
-        all_features_used.update(indices)
+    for model in ['mirai', 'replay', 'dos', 'spoof']:
+        all_features_used.update(get_feature_indices_for_model(model))
 
     print(f"\nTotal unique features used across all models: {len(all_features_used)}")
     print(f"Feature coverage: {len(all_features_used)}/{TOTAL_FEATURES} "
           f"({len(all_features_used) / TOTAL_FEATURES * 100:.1f}%)")
+    print(f"Unused indices: {sorted(set(range(TOTAL_FEATURES)) - all_features_used)}")
+
