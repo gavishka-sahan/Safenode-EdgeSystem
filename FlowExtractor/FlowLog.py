@@ -12,13 +12,11 @@ import paho.mqtt.client as mqtt
 
 def create_mqtt_client(client_id: str):
     try:
-        # Try paho-mqtt v2.x (>= 2.0.0)
         return mqtt.Client(
             client_id=client_id,
-            callback_api_version=mqtt.CallbackAPIVersion.VERSION1
+            callback_api_version=mqtt.CallbackAPIVersion.VERSION2
         )
     except (TypeError, AttributeError):
-        # Fall back to paho-mqtt v1.x (< 2.0.0)
         return mqtt.Client(client_id=client_id)
 
 
