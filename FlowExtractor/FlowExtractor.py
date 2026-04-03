@@ -8,7 +8,11 @@ import numpy as np
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
 
+<<<<<<< HEAD
 from scapy.all import sniff, IP, TCP, UDP, ICMP, GRE, Raw
+=======
+from scapy.all import sniff, IP, TCP, UDP, ICMP, Raw
+>>>>>>> ef16f59a23004139291d6de6d6e38ae6f7d05b4b
 import paho.mqtt.client as mqtt
 
 
@@ -75,6 +79,11 @@ _ch.setFormatter(_console_fmt)
 
 logger.addHandler(_fh)
 logger.addHandler(_ch)
+<<<<<<< HEAD
+=======
+
+# MQTT
+>>>>>>> ef16f59a23004139291d6de6d6e38ae6f7d05b4b
 
 
 class MQTTParser:
@@ -185,6 +194,7 @@ class Flow:
         # Track last TCP packet time for tcp.time_delta
         self._last_tcp_time = None
 
+<<<<<<< HEAD
         # Export state tracking
         self.exported_once = False
         self.packet_count_at_last_export = 0
@@ -196,6 +206,12 @@ class Flow:
         self.payload_sizes = []         # TCP/UDP application payload bytes per packet
 
         # New features (66-70) are computed from existing accumulators — no new lists needed
+=======
+        # Export state tracking, hybrid export logic to prevents duplicate exports
+        self.exported_once = False           # True after first export
+        self.packet_count_at_last_export = 0  # Packet count snapshot at last export
+        self.tcp_completed = False           # True if FIN or RST seen (flow is done)
+>>>>>>> ef16f59a23004139291d6de6d6e38ae6f7d05b4b
 
     def update(self, pkt, timestamp):
         """Update flow with a new packet."""
@@ -203,6 +219,10 @@ class Flow:
         self.packet_times.append(timestamp)
 
         if IP not in pkt:
+<<<<<<< HEAD
+=======
+            # Check non-IP layers
+>>>>>>> ef16f59a23004139291d6de6d6e38ae6f7d05b4b
             if pkt.haslayer('ARP'):
                 self.is_arp = True
             if pkt.haslayer('LLC'):
@@ -305,6 +325,10 @@ class Flow:
         elif ICMP in pkt:
             self.is_icmp = True
 
+<<<<<<< HEAD
+=======
+        # Non-IP layers
+>>>>>>> ef16f59a23004139291d6de6d6e38ae6f7d05b4b
         if pkt.haslayer('ARP'):
             self.is_arp = True
         if pkt.haslayer('LLC'):
@@ -374,7 +398,11 @@ class Flow:
             6: self.urg, 7: self.psh, 8: self.fin,
             9: avg(self.tcp_flags_values),
 
+<<<<<<< HEAD
             # Protocol binary flags (10-23)
+=======
+            # Protocol binary flags
+>>>>>>> ef16f59a23004139291d6de6d6e38ae6f7d05b4b
             10: int(self.is_tcp), 11: int(self.is_udp), 12: int(self.is_icmp),
             13: int(self.is_arp), 14: int(self.is_dns), 15: int(self.is_http),
             16: int(self.is_https), 17: int(self.is_telnet), 18: int(self.is_smtp),
@@ -388,7 +416,11 @@ class Flow:
             25: avg(self.frame_lengths),
             26: var(self.frame_lengths),
 
+<<<<<<< HEAD
             # Counts (27-32)
+=======
+            # Counts
+>>>>>>> ef16f59a23004139291d6de6d6e38ae6f7d05b4b
             27: total_pkts, 28: total_bytes,
             29: self.fwd_pkts, 30: self.bwd_pkts,
             31: self.fwd_bytes, 32: self.bwd_bytes,
@@ -416,7 +448,11 @@ class Flow:
             48: avg(self.frame_cap_lengths),
             49: avg(self.tcp_window_sizes),
 
+<<<<<<< HEAD
             # MQTT (50-55)
+=======
+            # MQTT
+>>>>>>> ef16f59a23004139291d6de6d6e38ae6f7d05b4b
             50: avg(self.mqtt_msgtype), 51: avg(self.mqtt_qos),
             52: avg(self.mqtt_dupflag), 53: avg(self.mqtt_retain),
             54: avg(self.mqtt_len), 55: avg(self.mqtt_topic_len),

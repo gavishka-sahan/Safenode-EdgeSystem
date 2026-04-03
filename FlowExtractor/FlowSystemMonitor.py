@@ -6,11 +6,13 @@ import psutil
 from datetime import datetime
 import paho.mqtt.client as mqtt
 
-BROKER = "192.168.8.135"       
+
+BROKER = "192.168.8.135"
 PORT = 1883
 TOPIC = "health/log"
 INTERFACE = "wlan0"             # Network interface to monitor
 INTERVAL = 10                   # Seconds between health reports
+
 
 # Processes to monitor (key services on Feature Extractor Pi)
 MONITORED_PROCESSES = {
@@ -22,8 +24,9 @@ MONITORED_PROCESSES = {
 sent_count = 0
 last_success_timestamp = None
 
+
 def get_cpu_temperature():
-    #Read CPU temperature (Raspberry Pi specific)
+    # Read CPU temperature (Raspberry Pi specific)
     try:
         with open("/sys/class/thermal/thermal_zone0/temp") as f:
             return round(int(f.read()) / 1000, 1)
@@ -32,7 +35,7 @@ def get_cpu_temperature():
 
 
 def get_hardware_health():
-    #Collect hardware metrics: CPU, memory, disk, network
+    # Collect hardware metrics: CPU, memory, disk, network
     mem = psutil.virtual_memory()
     disk = psutil.disk_usage('/')
     net = psutil.net_io_counters(pernic=True)
@@ -73,7 +76,7 @@ def get_hardware_health():
 
 
 def check_process(name):
-    #Check if a process is running by name or cmdline match
+    # Check if a process is running by name or cmdline match
     for proc in psutil.process_iter(['name', 'cmdline']):
         try:
             if name in str(proc.info):
@@ -84,7 +87,7 @@ def check_process(name):
 
 
 def get_software_health(client):
-    #Check running services and MQTT connectivity
+    # Check running services and MQTT connectivity
     services = {}
     for label, proc_name in MONITORED_PROCESSES.items():
         services[label] = check_process(proc_name)
@@ -97,9 +100,10 @@ def get_software_health(client):
 
 
 def on_publish(client, userdata, mid):
-    #Track successful MQTT publishes
+    # Track successful MQTT publishes
     global last_success_timestamp
     last_success_timestamp = datetime.utcnow().isoformat()
+
 
 try:
     client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION1)
