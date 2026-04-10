@@ -10,7 +10,7 @@ from ping3 import ping
 
 # Configuration
 BROKER = "localhost"
-HEALTH_TOPIC = "health/log"
+#HEALTH_TOPIC = "health/log"
 STORE_PATH = Path("./health_storage")
 MODELS_DIR = Path("./models")
 
