@@ -49,10 +49,10 @@ class Config:
 
     # Topics
     TOPIC_METADATA_IN = "metadata/extracted"
-    TOPIC_DETECTION_OUT = "detection/alerts"
+    #TOPIC_DETECTION_OUT = "detection/alerts"
     TOPIC_CLOUD_OUT = "cloud/metadata"
-    TOPIC_ADMIN_ALERTS = "admin/alerts"  # New: for admin notifications
-    TOPIC_ADMIN_COMMANDS = "admin/commands"  # New: for admin commands
+    #TOPIC_ADMIN_ALERTS = "admin/alerts"  # New: for admin notifications
+    #TOPIC_ADMIN_COMMANDS = "admin/commands"  # New: for admin commands
 
     # Model Paths
     MODEL_DIR = Path("models")
