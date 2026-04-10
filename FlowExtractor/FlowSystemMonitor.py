@@ -9,9 +9,9 @@ import paho.mqtt.client as mqtt
 
 BROKER = "192.168.8.135"
 PORT = 1883
-TOPIC = "health/log"
-INTERFACE = "wlan0"             # Network interface to monitor
-INTERVAL = 10                   # Seconds between health reports
+TOPIC = "FlowExtractor/SystemStat"
+INTERFACE = "wlan0"
+INTERVAL = 10                   # Seconds between health report
 
 
 # Processes to monitor (key services on Feature Extractor Pi)
@@ -99,59 +99,64 @@ def get_software_health(client):
     }
 
 
-def on_publish(client, userdata, mid):
-    # Track successful MQTT publishes
+def on_publish(client, userdata, mid, reason_code=None, properties=None):
     global last_success_timestamp
     last_success_timestamp = datetime.utcnow().isoformat()
 
 
-try:
-    client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION1)
-    print("[INIT] Using paho-mqtt v2.x")
-except (TypeError, AttributeError):
-    client = mqtt.Client()
-    print("[INIT] Using paho-mqtt v1.x")
+def main():
+    global sent_count
 
-client.on_publish = on_publish
+    try:
+        client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
+        print("[INIT] Using paho-mqtt v2.x")
+    except (TypeError, AttributeError):
+        client = mqtt.Client()
+        print("[INIT] Using paho-mqtt v1.x")
 
-try:
-    client.connect(BROKER, PORT, 60)
-    client.loop_start()
-    print(f"[INIT] Connected to MQTT broker at {BROKER}:{PORT}")
-except Exception as e:
-    print(f"[ERROR] Failed to connect to MQTT broker: {e}")
-    exit(1)
+    client.on_publish = on_publish
+
+    try:
+        client.connect(BROKER, PORT, 60)
+        client.loop_start()
+        print(f"[INIT] Connected to MQTT broker at {BROKER}:{PORT}")
+    except Exception as e:
+        print(f"[ERROR] Failed to connect to MQTT broker: {e}")
+        exit(1)
+
+    print(f"[INIT] Topic: {TOPIC} | Interface: {INTERFACE} | Interval: {INTERVAL}s")
+    print("Press Ctrl+C to stop\n")
+
+    try:
+        while True:
+            sent_count += 1
+
+            health = {
+                "module": "feature_extractor",
+                "timestamp": datetime.utcnow().isoformat(),
+                "hardware": get_hardware_health(),
+                "software": get_software_health(client),
+                "sent_count": sent_count
+            }
+
+            result = client.publish(TOPIC, json.dumps(health))
+
+            ts = datetime.now().strftime('%H:%M:%S')
+            hw = health['hardware']
+            if result.rc == mqtt.MQTT_ERR_SUCCESS:
+                temp = f" | Temp: {hw['cpu_temperature_c']}°C" if hw['cpu_temperature_c'] else ""
+                print(f"[{ts}] Sent #{sent_count} | CPU: {hw['cpu_usage_percent']:.1f}% | Mem: {hw['memory']['percent']:.1f}%{temp}")
+            else:
+                print(f"[{ts}] Failed to send (rc={result.rc})")
+
+            time.sleep(INTERVAL)
+
+    except KeyboardInterrupt:
+        print(f"\n[STOP] Shutting down... Total reports sent: {sent_count}")
+        client.loop_stop()
+        client.disconnect()
+        print("[STOP] Disconnected from MQTT broker")
 
 
-print(f"[INIT] Topic: {TOPIC} | Interface: {INTERFACE} | Interval: {INTERVAL}s")
-print("Press Ctrl+C to stop\n")
-
-try:
-    while True:
-        sent_count += 1
-
-        health = {
-            "module": "feature_extractor",
-            "timestamp": datetime.utcnow().isoformat(),
-            "hardware": get_hardware_health(),
-            "software": get_software_health(client),
-            "sent_count": sent_count
-        }
-
-        result = client.publish(TOPIC, json.dumps(health))
-
-        ts = datetime.now().strftime('%H:%M:%S')
-        hw = health['hardware']
-        if result.rc == mqtt.MQTT_ERR_SUCCESS:
-            temp = f" | Temp: {hw['cpu_temperature_c']}°C" if hw['cpu_temperature_c'] else ""
-            print(f"[{ts}] Sent #{sent_count} | CPU: {hw['cpu_usage_percent']:.1f}% | Mem: {hw['memory']['percent']:.1f}%{temp}")
-        else:
-            print(f"[{ts}] Failed to send (rc={result.rc})")
-
-        time.sleep(INTERVAL)
-
-except KeyboardInterrupt:
-    print(f"\n[STOP] Shutting down... Total reports sent: {sent_count}")
-    client.loop_stop()
-    client.disconnect()
-    print("[STOP] Disconnected from MQTT broker")
+if __name__ == "__main__":
+    main()

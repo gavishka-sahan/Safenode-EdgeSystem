@@ -5,7 +5,7 @@ import time
 import json
 import logging
 import numpy as np
-from datetime import datetime, timezone
+from datetime import datetime
 from logging.handlers import RotatingFileHandler
 
 from scapy.all import sniff, IP, TCP, UDP, ICMP, GRE, Raw
@@ -28,7 +28,6 @@ class Config:
     MQTT_BROKER = "192.168.1.11"
     MQTT_PORT = 1883
     MQTT_TOPIC_EDGE = "metadata/extracted"
-    MQTT_TOPIC_CLOUD = "cloud/metadata"
     MQTT_QOS = 1
     MQTT_CLIENT_ID = "feature_extractor_pi4"
     MQTT_KEEPALIVE = 60
@@ -539,25 +538,6 @@ class MQTTPublisher:
             self.failed += 1
             logger.error(f"MQTT publish error: {e}")
 
-    def publish_batch(self, flows):
-        if not self.is_connected:
-            return
-        try:
-            batch = {
-                'batch_id': f"batch_{int(time.time())}",
-                'timestamp': datetime.now(timezone.utc).isoformat(),
-                'count': len(flows),
-                'flows': flows
-            }
-            result = self.client.publish(Config.MQTT_TOPIC_CLOUD, json.dumps(batch), qos=Config.MQTT_QOS)
-            if result.rc == mqtt.MQTT_ERR_SUCCESS:
-                logger.info(f"Batch of {len(flows)} flows published to cloud")
-            else:
-                self.failed += 1
-        except Exception as e:
-            self.failed += 1
-            logger.error(f"Batch publish error: {e}")
-
     def stats(self):
         total = self.publish_count + self.failed
         return {
@@ -668,7 +648,6 @@ class FlowManager:
             return
 
         exported = 0
-        flows_for_batch = []
 
         try:
             with open(Config.OUTPUT_FILE, 'a') as f:
@@ -692,7 +671,6 @@ class FlowManager:
                     }
 
                     f.write(json.dumps(flow_data) + '\n')
-                    flows_for_batch.append(flow_data)
 
                     if self.mqtt.is_connected:
                         self.mqtt.publish_flow(flow_data)
@@ -700,9 +678,6 @@ class FlowManager:
                     flow.exported_once = True
                     flow.packet_count_at_last_export = current_pkt_count
                     exported += 1
-
-            if flows_for_batch and self.mqtt.is_connected:
-                self.mqtt.publish_batch(flows_for_batch)
 
             logger.debug(f"_export_specific_flows: {exported} flows, reason={export_reason}, is_final={is_final}")
 
@@ -758,7 +733,7 @@ def main():
     logger.info("=" * 70)
     logger.info(f"Interface: {Config.INTERFACE}")
     logger.info(f"Flow timeout: {Config.FLOW_TIMEOUT}s | Export interval: {Config.FLOW_EXPORT_INTERVAL}s")
-    logger.info(f"MQTT: {Config.MQTT_BROKER}:{Config.MQTT_PORT} | Topics: {Config.MQTT_TOPIC_EDGE}, {Config.MQTT_TOPIC_CLOUD}")
+    logger.info(f"MQTT: {Config.MQTT_BROKER}:{Config.MQTT_PORT} | Topic: {Config.MQTT_TOPIC_EDGE}")
     logger.info(f"Protocol detection: {Config.ENABLE_PROTOCOL_DETECTION} | MQTT parsing: {Config.ENABLE_MQTT_PARSING}")
     logger.info("=" * 70)
 
