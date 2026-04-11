@@ -10,7 +10,6 @@ from ping3 import ping
 
 # Configuration
 BROKER = "localhost"
-#HEALTH_TOPIC = "health/log"
 STORE_PATH = Path("./health_storage")
 MODELS_DIR = Path("./models")
 
@@ -50,7 +49,6 @@ def on_message(client, userdata, msg):
 def on_connect(client, userdata, flags, rc, properties=None):
     if rc == 0:
         print(" Connected to MQTT broker")
-        client.subscribe(HEALTH_TOPIC)
     else:
         print(f" Connection failed (rc={rc})")
 
@@ -96,7 +94,7 @@ def main():
         print(f" MQTT connection failed: {e}")
         return
 
-    print(f" Listening on: {HEALTH_TOPIC}")
+    print(" Health monitor running")
     # print("Press Ctrl+C to stop\n")
 
     try:
