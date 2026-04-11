@@ -27,6 +27,10 @@ TOPIC_EXT_HEALTH = "telemetry/extractor/health"
 TOPIC_EDGE_LOG = "telemetry/edge/log"
 TOPIC_EXT_LOG = "telemetry/extractor/log"
 
+# --- FlowExtractor MQTT Topics (subscribe on local broker) ---
+TOPIC_EXT_LOG_MQTT = "FlowExtractor/log"
+TOPIC_EXT_STAT_MQTT = "FlowExtractor/SystemStat"
+
 # --- File Paths ---
 FILE_EDGE_HEALTH = "/opt/EdgeHealth/health_storage/edge_ml_health.json"
 FILE_EXT_HEALTH = "/opt/EdgeHealth/health_storage/feature_health.json"
@@ -103,12 +107,22 @@ def on_local_connect(client, userdata, flags, rc, properties=None):
     if rc == 0:
         print(f"Connected to Local Broker ({LOCAL_BROKER_IP})")
         client.subscribe(LOCAL_JSON_TOPIC)
+        client.subscribe(TOPIC_EXT_LOG_MQTT)
+        client.subscribe(TOPIC_EXT_STAT_MQTT)
     else:
         print(f"Local connection failed with code {rc}")
 
 
 def on_local_message(client, userdata, msg):
     try:
+        if msg.topic == TOPIC_EXT_LOG_MQTT:
+            cloud_client.publish(TOPIC_EXT_LOG, msg.payload.decode(), qos=1)
+            return
+
+        if msg.topic == TOPIC_EXT_STAT_MQTT:
+            cloud_client.publish(TOPIC_EXT_HEALTH, msg.payload.decode(), qos=0)
+            return
+
         payload = json.loads(msg.payload.decode())
         meta = payload.get('metadata', {})
         indexed_features = meta.get('features', {})
