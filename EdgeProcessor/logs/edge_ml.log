@@ -1,0 +1,22 @@
+2026-04-12 11:10:07,370 | INFO     | ================================================================================
+2026-04-12 11:10:07,371 | INFO     | EDGE ML MODULE - SEVERITY-BASED THREAT DETECTION v4.0
+2026-04-12 11:10:07,371 | INFO     | ================================================================================
+2026-04-12 11:10:07,371 | INFO     | Start Time: 2026-04-12 11:10:07
+2026-04-12 11:10:07,371 | INFO     | Python: 3.13.5 (main, Jun 25 2025, 18:55:22) [GCC 14.2.0]
+2026-04-12 11:10:07,372 | INFO     | ONNX Runtime: 1.24.2
+2026-04-12 11:10:07,372 | INFO     | Edge features: 71
+2026-04-12 11:10:07,372 | INFO     | Cloud features: 27
+2026-04-12 11:10:07,372 | INFO     | 
+2026-04-12 11:10:07,373 | INFO     | ================================================================================
+2026-04-12 11:10:07,373 | INFO     | LOADING ML MODELS
+2026-04-12 11:10:07,373 | INFO     | ================================================================================
+2026-04-12 11:10:07,374 | WARNING  | Model not found: models/mirai_model.onnx
+2026-04-12 11:10:07,374 | WARNING  |   Skipping mirai model
+2026-04-12 11:10:07,374 | WARNING  | Model not found: models/dos_model.onnx
+2026-04-12 11:10:07,374 | WARNING  |   Skipping dos model
+2026-04-12 11:10:07,374 | WARNING  | Model not found: models/replay_model.onnx
+2026-04-12 11:10:07,374 | WARNING  |   Skipping replay model
+2026-04-12 11:10:07,375 | WARNING  | Model not found: models/spoof_model.onnx
+2026-04-12 11:10:07,375 | WARNING  |   Skipping spoof model
+2026-04-12 11:10:07,375 | ERROR    | No models loaded! System cannot operate.
+2026-04-12 11:10:07,375 | ERROR    | Please ensure at least one model file is in the models/ directory
