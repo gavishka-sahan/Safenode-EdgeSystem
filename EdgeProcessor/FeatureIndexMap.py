@@ -166,8 +166,8 @@ def get_feature_indices_for_model(model_name: str) -> List[int]:
         # UDP→11, DHCP→21, ICMP→12, avg_packet_size→25,
         # inter_arrival_std→40, fin_count→8, gre_inner_protocol→61,
         # fwd_bwd_ratio→62, pkt_size_variance→26
-        'mirai': [0, 1, 3, 5, 15, 16, 14, 19, 20, 10, 11, 21, 12, 25, 40, 8, 61, 62, 26],
-
+        'mirai': [0, 1, 3, 5, 15, 16, 14, 19, 20, 10, 11, 21, 12, 25, 40, 8],
+# 61, 62, 26
         # SPOOFING (15 features)
         # ttl_value→56, syn_count→3, ack_count→4, rst_count→5,
         # iat_mean→39, iat_std→40, rate→1, flow_duration→0,
