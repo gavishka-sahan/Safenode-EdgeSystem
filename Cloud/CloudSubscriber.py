@@ -4,7 +4,7 @@ import requests
 import paho.mqtt.client as mqtt
 import uuid
 from datetime import datetime
-from DLInferenceService import handle_dl_inference_from_json
+# from DLInferenceService import handle_dl_inference_from_json
 
 DATA_DIR = "/root/cloud_data_storage"
 JSON_DIR = os.path.join(DATA_DIR, "json")
@@ -29,20 +29,20 @@ BROKER_PORT = 1883
 # ==========================================================
 
 TOPIC_EDGE_HEALTH = "telemetry/edge/health"
-TOPIC_EXT_HEALTH  = "telemetry/extractor/health"
+TOPIC_EXT_HEALTH = "telemetry/extractor/health"
 
 TOPIC_EDGE_LOG = "telemetry/edge/log"
-TOPIC_EXT_LOG  = "telemetry/extractor/log"
+TOPIC_EXT_LOG = "telemetry/extractor/log"
 
 TOPIC_FEATURES = "cloud/binary/features"   # carries JSON
-TOPIC_ALERTS   = "cloud/binary/alerts"     # carries JSON
+TOPIC_ALERTS = "cloud/binary/alerts"     # carries JSON
 TOPIC_METADATA = "cloud/metadata"
 
 # ==========================================================
 # FASTAPI BACKEND
 # ==========================================================
 
-#API_BASE = "http://localhost:8000"
+# API_BASE = "http://localhost:8000"
 API_BASE = "http://localhost:8000/api/v1"
 
 # ==========================================================
@@ -52,6 +52,7 @@ API_BASE = "http://localhost:8000/api/v1"
 # ==========================================================
 
 pending_features = {}
+
 
 def map_classification(attack_type: str, is_threat: bool) -> str:
     if not is_threat:
@@ -71,16 +72,21 @@ def map_classification(attack_type: str, is_threat: bool) -> str:
 # MQTT CONNECT CALLBACK
 # ==========================================================
 
+
 def on_connect(client, userdata, flags, reason_code, properties):
     if reason_code == 0:
         print("✓ Connected to Cloud MQTT Broker")
-        client.subscribe(TOPIC_EDGE_HEALTH)
-        client.subscribe(TOPIC_EXT_HEALTH)
-        client.subscribe(TOPIC_EDGE_LOG)
-        client.subscribe(TOPIC_EXT_LOG)
-        client.subscribe(TOPIC_FEATURES)
-        client.subscribe(TOPIC_ALERTS)
-        client.subscribe(TOPIC_METADATA)
+        # QoS 0: periodic health snapshots — a missed one is superseded by the next in 30s
+        client.subscribe(TOPIC_EDGE_HEALTH, qos=0)
+        client.subscribe(TOPIC_EXT_HEALTH, qos=0)
+        # QoS 1: log lines are non-recoverable; at-least-once prevents audit gaps
+        client.subscribe(TOPIC_EDGE_LOG, qos=1)
+        client.subscribe(TOPIC_EXT_LOG, qos=1)
+        # QoS 1: features and alerts drive DB inserts; loss = missing detection record
+        client.subscribe(TOPIC_FEATURES, qos=1)
+        client.subscribe(TOPIC_ALERTS, qos=1)
+        # QoS 0: raw metadata passthrough, file-only, not DB-critical
+        client.subscribe(TOPIC_METADATA, qos=0)
         print("Subscribed to all topics")
     else:
         print("Connection failed with code", reason_code)
@@ -152,7 +158,7 @@ def on_message(client, userdata, msg):
         # --------------------------------------------------
         elif topic == TOPIC_FEATURES:
             data = json.loads(payload.decode())
-            flow_id  = data.get('flow_id', 'unknown')
+            flow_id = data.get('flow_id', 'unknown')
             features = data.get('features', {})
 
             # Save to file
@@ -171,32 +177,32 @@ def on_message(client, userdata, msg):
         elif topic == TOPIC_ALERTS:
             data = json.loads(payload.decode())
 
-            is_threat   = data.get('is_threat', False)
-            src_ip      = data.get('src_ip', '0.0.0.0')
-            dst_ip      = data.get('dst_ip', '0.0.0.0')
-            confidence  = data.get('max_confidence', 0.0)
-            latency     = data.get('inference_time_ms', 0.0)
-            threats     = data.get('threats', [])
-            flow_id     = data.get('flow_id', 'unknown')
-            device_id   = data.get('device_id', 'unknown')
+            is_threat = data.get('is_threat', False)
+            src_ip = data.get('src_ip', '0.0.0.0')
+            dst_ip = data.get('dst_ip', '0.0.0.0')
+            confidence = data.get('max_confidence', 0.0)
+            latency = data.get('inference_time_ms', 0.0)
+            threats = data.get('threats', [])
+            flow_id = data.get('flow_id', 'unknown')
+            device_id = data.get('device_id', 'unknown')
             attack_type = threats[0].get('attack_type', 'Unknown') if threats else 'None'
 
             # Save full detection result to file
             detection_record = {
-                "timestamp":         timestamp,
-                "source_ip":         src_ip,
-                "destination_ip":    dst_ip,
-                "flow_id":           flow_id,
-                "device_id":         device_id,
-                "is_threat":         is_threat,
-                "threat_count":      data.get('threat_count', 0),
-                "max_confidence":    confidence,
+                "timestamp": timestamp,
+                "source_ip": src_ip,
+                "destination_ip": dst_ip,
+                "flow_id": flow_id,
+                "device_id": device_id,
+                "is_threat": is_threat,
+                "threat_count": data.get('threat_count', 0),
+                "max_confidence": confidence,
                 "inference_time_ms": latency,
-                "attack_type":       attack_type,
-                "threats":           threats,
-                "severity":          "High" if is_threat else "Normal",
-                "mitigation":        "blocked" if is_threat else "none",
-                "edge_timestamp":    data.get('edge_timestamp')
+                "attack_type": attack_type,
+                "threats": threats,
+                "severity": "High" if is_threat else "Normal",
+                "mitigation": "blocked" if is_threat else "none",
+                "edge_timestamp": data.get('edge_timestamp')
             }
             with open(os.path.join(DETECTION_RESULTS_DIR, f"{timestamp}_detection.json"), "w") as f:
                 json.dump(detection_record, f, indent=2)
@@ -204,19 +210,19 @@ def on_message(client, userdata, msg):
 
             # Post detection event to API
             db_payload = {
-                #"attack_type":           attack_type,
-                "attack_type":           map_classification(attack_type, is_threat),
-                "severity":              "High" if is_threat else "Normal",
-                "model_name":            "EdgeML",
+                # "attack_type":           attack_type,
+                "attack_type": map_classification(attack_type, is_threat),
+                "severity": "High" if is_threat else "Normal",
+                "model_name": "EdgeML",
                 "processing_latency_ms": latency,
-                "mitigation":            "blocked" if is_threat else "none"
+                "mitigation": "blocked" if is_threat else "none"
             }
             requests.post(f"{API_BASE}/detection-events", json=db_payload)
             print("Inserted detection event")
 
             # Correlate with stored features and post /traffic-features
             # with the correct classification label
-            
+
             features = pending_features.pop(flow_id, {})
             # ── DL INFERENCE ────────────────────────────────
             dl_is_threat = False
@@ -228,31 +234,20 @@ def on_message(client, userdata, msg):
             except Exception as dl_e:
                 print(f"DL inference error: {dl_e}")
             traffic_db_payload = {
-                "src_ip":         src_ip,
-                "dst_ip":         dst_ip,
-                "protocol":       "TCP" if flow_id.endswith("/6") else "UDP" if flow_id.endswith("/17") else "OTHER",
-                "byte_count":     int(features.get('byte_count', 0)),
-                "packet_size":    float(features.get('avg_packet_size', 0)),
-                "ttl":            float(features.get('ttl_value', 0)),
-                "timestamp":      data.get('timestamp'),
+                "src_ip": src_ip,
+                "dst_ip": dst_ip,
+                "protocol": "TCP" if flow_id.endswith("/6") else "UDP" if flow_id.endswith("/17") else "OTHER",
+                "byte_count": int(features.get('byte_count', 0)),
+                "packet_size": float(features.get('avg_packet_size', 0)),
+                "ttl": float(features.get('ttl_value', 0)),
+                "timestamp": data.get('timestamp'),
                 "classification": map_classification(attack_type, is_threat),
-                "ml":             is_threat,
-                "dl":             dl_is_threat,
-                "event_id":       str(uuid.uuid4())
+                "ml": is_threat,
+                "dl": dl_is_threat,
+                "event_id": str(uuid.uuid4())
             }
             requests.post(f"{API_BASE}/traffic-features", json=traffic_db_payload)
 
- #           features = pending_features.pop(flow_id, {})
-#            traffic_db_payload = {
-#                "packet_size":    features.get('avg_packet_size', 0),
-#                "ttl":            features.get('ttl_value', 0),
-#                "byte_count":     features.get('byte_count', 0),
-#                #"classification": attack_type if is_threat else "Normal",
-#                "classification": map_classification(attack_type, is_threat),
-#                "ml":             is_threat,
-#                "dl":             True
-#            }
-#            requests.post(f"{API_BASE}/traffic-features", json=traffic_db_payload)
             print(f"Inserted traffic features | classification={traffic_db_payload['classification']}")
 
         # --------------------------------------------------
