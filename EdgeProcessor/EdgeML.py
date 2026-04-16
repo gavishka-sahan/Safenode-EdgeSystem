@@ -6,7 +6,7 @@ import time
 import uuid
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 from datetime import datetime
 from collections import defaultdict
 
@@ -29,21 +29,18 @@ from FeatureIndexMap import (
 from DLFeatureSelector import (
     select_cloud_features,
     TOTAL_CLOUD_FEATURES,
-    CLOUD_INDICES
 )
 
 # Import Severity Manager
 from ThresholdSet import (
     ThreatSeverityManager,
-    SeverityLevel,
     ActionType,
     SeverityConfig
 )
 
 
-
 class Config:
-#System configuration
+    # System configuration
 
     # MQTT Settings
     MQTT_BROKER = "localhost"
@@ -52,10 +49,7 @@ class Config:
 
     # Topics
     TOPIC_METADATA_IN = "metadata/extracted"
-    TOPIC_DETECTION_OUT = "detection/alerts"
     TOPIC_CLOUD_OUT = "cloud/metadata"
-    TOPIC_ADMIN_ALERTS = "admin/alerts"  # New: for admin notifications
-    TOPIC_ADMIN_COMMANDS = "admin/commands"  # New: for admin commands
 
     # Model Paths
     MODEL_DIR = Path("models")
@@ -97,6 +91,7 @@ def setup_logging():
 
 
 logger = setup_logging()
+
 
 class MLModelManager:
 
@@ -191,7 +186,7 @@ class MLModelManager:
                 if 'inference_time_ms' in model_info:
                     logger.info(f"  Target inference time: {model_info['inference_time_ms']:.2f}ms")
 
-                logger.info(f"  Key features:")
+                logger.info("  Key features:")
                 for idx in indices[:5]:
                     logger.info(f"    [{idx}] {get_feature_name(idx)}")
                 if len(indices) > 5:
@@ -213,9 +208,9 @@ class MLModelManager:
         logger.info("=" * 80)
 
     def select_features(self, all_features: Dict[int, float], model_name: str) -> np.ndarray:
-        
+
         indices = self.feature_indices[model_name]
-        #selected = [all_features.get(i, 0.0) for i in indices]
+        # selected = [all_features.get(i, 0.0) for i in indices]
         selected = [all_features.get(i, all_features.get(str(i), 0.0)) for i in indices]
         return np.array([selected], dtype=np.float32)
 
@@ -229,7 +224,7 @@ class MLModelManager:
         return model_thresholds.get(model_name, Config.THREAT_THRESHOLD)
 
     def predict(self, model_name: str, features: np.ndarray) -> Tuple[bool, float, int, float]:
-        
+
         try:
             model = self.models[model_name]
             model_type = self.model_types[model_name]
@@ -326,13 +321,13 @@ class ThreatDetector:
     def detect_threats(self, metadata: Dict) -> Dict:
         device_id = metadata.get('device_id', 'unknown')
         timestamp = metadata.get('timestamp', time.time())
-        #feature_id = metadata.get('feature_id', 'unknown')
+        # feature_id = metadata.get('feature_id', 'unknown')
         feature_id = metadata.get('feature_id') or metadata.get('flow_id', 'unknown')
         features = metadata.get('features', {})
 
         # Validate feature count
         if len(features) < 1:
-            logger.warning(f"No features received")
+            logger.warning("No features received")
             return self._create_error_result(device_id, timestamp, "No features received")
 
         # Run each model
@@ -451,7 +446,6 @@ class ThreatDetector:
         }
 
 
-
 class MQTTHandler:
 
     def __init__(self, detector: ThreatDetector):
@@ -464,16 +458,15 @@ class MQTTHandler:
         self.client.on_connect = self._on_connect
         self.client.on_message = self._on_message
         self.connected = False
-        
+
         # Initialize Severity Manager
         self.severity_manager = ThreatSeverityManager()
-        
+
         # Statistics
         self.stats = {
             'messages_received': 0,
             'threats_detected': 0,
-            'isolations_triggered': 0,
-            'alerts_sent': 0
+            'isolations_triggered': 0
         }
 
     def _on_connect(self, client, userdata, connect_flags, reason_code, properties):
@@ -481,22 +474,12 @@ class MQTTHandler:
             logger.info("Connected to MQTT broker")
             client.subscribe(Config.TOPIC_METADATA_IN)
             logger.info(f"Subscribed to {Config.TOPIC_METADATA_IN}")
-            
-            # Subscribe to admin commands
-            client.subscribe(Config.TOPIC_ADMIN_COMMANDS)
-            logger.info(f"Subscribed to {Config.TOPIC_ADMIN_COMMANDS}")
-            
             self.connected = True
         else:
             logger.error(f"MQTT connection failed with code {reason_code}")
 
     def _on_message(self, client, userdata, msg):
         try:
-            # Route messages based on topic
-            if msg.topic == Config.TOPIC_ADMIN_COMMANDS:
-                self._handle_admin_command(msg)
-                return
-            
             payload = json.loads(msg.payload.decode())
 
             if isinstance(payload, list):
@@ -514,7 +497,7 @@ class MQTTHandler:
 
     def _process_single_flow(self, flow_data: dict, client):
         """Process a single flow's metadata with severity-based isolation"""
-        
+
         self.stats['messages_received'] += 1
 
         # Parse features from the message
@@ -546,7 +529,7 @@ class MQTTHandler:
 
         metadata = {
             'features': indexed_features,
-            #'feature_id': flow_data.get('feature_id', 'unknown'),
+            # 'feature_id': flow_data.get('feature_id', 'unknown'),
             'feature_id': flow_data.get('feature_id') or flow_data.get('flow_id', 'unknown'),
             'device_id': flow_data.get('device_id', flow_data.get('src_ip', 'unknown')),
             'device_mac': device_mac,
@@ -561,12 +544,12 @@ class MQTTHandler:
         if result['is_threat']:
             self.stats['threats_detected'] += 1
             self._handle_threat_with_severity(result, metadata, client)
-        
+
         # Forward to cloud (all flows, not just threats)
         if Config.CLOUD_FORWARD_ENABLED:
             # Extract only the 27 cloud features from 61 edge features
             cloud_features = select_cloud_features(indexed_features)
-            
+
             cloud_message = {
                 'metadata': {
                     'features': cloud_features,  # Only 27 features
@@ -589,12 +572,12 @@ class MQTTHandler:
 
     def _handle_threat_with_severity(self, result: Dict, metadata: Dict, client):
         device_mac = metadata.get('device_mac', 'unknown')
-        
+
         for threat in result.get('threats_detected', []):
             model_name = threat['model']
             confidence = threat['confidence']
             attack_type = threat['attack_type']
-            
+
             # Record detection in severity manager
             decision = self.severity_manager.record_detection(
                 device_mac=device_mac,
@@ -607,141 +590,59 @@ class MQTTHandler:
                     'feature_id': metadata.get('feature_id')
                 }
             )
-            
+
             # Take action based on severity decision
             self._execute_severity_decision(decision, result, metadata, client)
 
     def _execute_severity_decision(self, decision, result: Dict, metadata: Dict, client):
         """Execute action based on severity decision"""
-        
+
         device_mac = metadata.get('device_mac', 'unknown')
-        
+
         if decision.action == ActionType.ISOLATE:
             # CRITICAL: Auto-isolate immediately
             if not self.severity_manager.is_already_isolated(device_mac):
                 logger.warning(
                     f"CRITICAL | {device_mac} | "
                     f"{decision.detection_count} detections in {decision.window_seconds}s | "
-                    f"AUTO-ISOLATING"
+                    "AUTO-ISOLATING"
                 )
-                
+
                 self._trigger_isolation(device_mac, result, decision)
                 self.severity_manager.mark_as_isolated(device_mac)
                 self.stats['isolations_triggered'] += 1
-                
+
         elif decision.action == ActionType.ISOLATE_AND_ALERT:
             # HIGH: Auto-isolate + alert admin
             if not self.severity_manager.is_already_isolated(device_mac):
                 logger.warning(
                     f"HIGH | {device_mac} | "
                     f"{decision.detection_count} detections | "
-                    f"ISOLATING + ALERT"
+                    "ISOLATING + ALERT"
                 )
-                
+
                 self._trigger_isolation(device_mac, result, decision)
                 self.severity_manager.mark_as_isolated(device_mac)
-                self._send_admin_alert(decision, result, client)
                 self.stats['isolations_triggered'] += 1
-                self.stats['alerts_sent'] += 1
-                
+
         elif decision.action == ActionType.ALERT_ONLY:
             # MEDIUM: Alert only, no isolation
             logger.info(
                 f"MEDIUM | {device_mac} | "
                 f"{decision.detection_count} detections | "
-                f"ALERT ONLY (no isolation)"
+                "ALERT ONLY (no isolation)"
             )
-            self._send_admin_alert(decision, result, client)
-            self.stats['alerts_sent'] += 1
-            
+
         elif decision.action == ActionType.LOG_ONLY:
             # LOW: Just log
             logger.debug(
                 f"LOW | {device_mac} | "
-                f"1 detection | Logged (need more to escalate)"
+                "1 detection | Logged (need more to escalate)"
             )
 
     def _trigger_isolation(self, device_mac: str, result: Dict, decision):
         """Trigger device isolation"""
-        
-        # Prepare isolation command
-        isolation_command = {
-            'action': 'isolate',
-            'device_mac': device_mac,
-            'device_id': result.get('device_id', 'unknown'),
-            'event_id': result.get('event_id'),
-            'severity': decision.severity.value,
-            'detection_count': decision.detection_count,
-            'threat_types': decision.threat_types,
-            'confidence': decision.average_confidence,
-            'timestamp': time.time(),
-            'reason': decision.reason
-        }
-        
-        # Publish to isolation topic
-        self.client.publish(
-            Config.TOPIC_DETECTION_OUT,
-            json.dumps(isolation_command),
-            qos=1
-        )
-        
-        logger.info(f"Isolation command sent for {device_mac}")
-
-    def _send_admin_alert(self, decision, result: Dict, client):
-        """Send alert to admin dashboard"""
-        
-        alert = {
-            'type': 'THREAT_ALERT',
-            'timestamp': time.time(),
-            'device_mac': decision.device_mac,
-            'device_id': result.get('device_id', 'unknown'),
-            'severity': decision.severity.value,
-            'action_taken': decision.action.value,
-            'detection_count': decision.detection_count,
-            'threat_types': decision.threat_types,
-            'average_confidence': decision.average_confidence,
-            'reason': decision.reason,
-            'is_critical_device': decision.is_critical_device,
-            'requires_review': decision.action in [ActionType.ISOLATE_AND_ALERT, ActionType.ALERT_ONLY]
-        }
-        
-        client.publish(
-            Config.TOPIC_ADMIN_ALERTS,
-            json.dumps(alert),
-            qos=1
-        )
-        
-        logger.info(f"Admin alert sent for {decision.device_mac}")
-
-    def _handle_admin_command(self, msg):
-        """Handle commands from admin dashboard"""
-        try:
-            command = json.loads(msg.payload.decode())
-            action = command.get('action')
-            device_mac = command.get('device_mac')
-            
-            logger.info(f"Admin command: {action} for {device_mac}")
-            
-            if action == 'restore':
-                # Admin restores device
-                self.severity_manager.mark_as_restored(device_mac)
-                logger.info(f"Device {device_mac} restored by admin")
-                
-            elif action == 'false_positive':
-                # Admin marks as false positive
-                self.severity_manager.mark_as_false_positive(device_mac)
-                logger.info(f"Device {device_mac} marked as false positive")
-                
-            elif action == 'manual_isolate':
-                # Admin manually isolates
-                self.severity_manager.mark_as_isolated(device_mac)
-                logger.info(f"Device {device_mac} manually isolated by admin")
-                
-            else:
-                logger.warning(f"Unknown admin command: {action}")
-                
-        except Exception as e:
-            logger.error(f"Error handling admin command: {e}")
+        logger.info(f"Isolation triggered for {device_mac} | severity={decision.severity.value} | reason={decision.reason}")
 
     def connect(self):
         """Connect to MQTT broker"""
@@ -764,6 +665,7 @@ class MQTTHandler:
             **self.stats,
             'severity_stats': self.severity_manager.get_stats()
         }
+
 
 def main():
     """Main entry point"""
@@ -796,16 +698,13 @@ def main():
     logger.info(f"  CRITICAL: ≥{SeverityConfig.CRITICAL_THRESHOLD} detections → Auto-Isolate")
     logger.info(f"  HIGH:     ≥{SeverityConfig.HIGH_THRESHOLD} detections → Isolate + Alert")
     logger.info(f"  MEDIUM:   ≥{SeverityConfig.MEDIUM_THRESHOLD} detections → Alert Only")
-    logger.info(f"  LOW:      1 detection → Log Only")
+    logger.info("  LOW:      1 detection → Log Only")
     logger.info("")
     logger.info("=" * 80)
     logger.info("✓ EDGE ML SYSTEM READY")
     logger.info("=" * 80)
     logger.info(f"Listening on: {Config.TOPIC_METADATA_IN}")
-    logger.info(f"Alert topic:  {Config.TOPIC_DETECTION_OUT}")
     logger.info(f"Cloud topic:  {Config.TOPIC_CLOUD_OUT}")
-    logger.info(f"Admin alerts: {Config.TOPIC_ADMIN_ALERTS}")
-    logger.info(f"Admin commands: {Config.TOPIC_ADMIN_COMMANDS}")
     logger.info("")
     logger.info("Active Models:")
     for model_name in model_manager.models.keys():
@@ -824,24 +723,23 @@ def main():
         # Get all statistics
         handler_stats = mqtt_handler.get_stats()
         detector_stats = detector.get_stats()
-        
+
         logger.info("\n" + "=" * 80)
         logger.info("FINAL STATISTICS")
         logger.info("=" * 80)
-        
+
         logger.info("\nMessage Processing:")
         logger.info(f"  Messages received: {handler_stats['messages_received']}")
         logger.info(f"  Threats detected: {handler_stats['threats_detected']}")
         logger.info(f"  Isolations triggered: {handler_stats['isolations_triggered']}")
-        logger.info(f"  Alerts sent: {handler_stats['alerts_sent']}")
-        
+
         logger.info("\nML Detection Stats:")
         logger.info(f"  Total flows processed: {detector_stats['total_detections']}")
         if detector_stats['threats_by_model']:
             logger.info("  Threats by model:")
             for model, count in sorted(detector_stats['threats_by_model'].items()):
                 logger.info(f"    {model:12s}: {count} threats")
-        
+
         logger.info("\nSeverity Stats:")
         severity_stats = handler_stats['severity_stats']
         logger.info(f"  Total detections recorded: {severity_stats['total_detections']}")

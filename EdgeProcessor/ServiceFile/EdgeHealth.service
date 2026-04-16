@@ -1,0 +1,29 @@
+[Unit]
+Description=IoT Network Feature Extractor
+After=network.target
+#Documentation=https://github.com/
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/EdgeHealth
+ExecStart=/usr/bin/python3 /opt/EdgeHealth/EdgeHealth.py
+Restart=always
+RestartSec=10
+
+# Environment
+Environment="PYTHONUNBUFFERED=1"
+
+# Resource limits (Raspberry Pi 4GB)
+MemoryMax=1G
+CPUQuota=100%
+
+# Logging
+StandardOutput=append:/var/log/EdgeHealth/EdgeHealth.log
+StandardError=append:/var/log/EdgeHealth/EdgeHealth.log
+
+# Capabilities (for packet capture without full root)
+AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
+
+[Install]
+WantedBy=multi-user.target

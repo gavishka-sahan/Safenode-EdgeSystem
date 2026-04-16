@@ -1,0 +1,505 @@
+2026-04-12 11:10:07,370 | INFO     | ================================================================================
+2026-04-12 11:10:07,371 | INFO     | EDGE ML MODULE - SEVERITY-BASED THREAT DETECTION v4.0
+2026-04-12 11:10:07,371 | INFO     | ================================================================================
+2026-04-12 11:10:07,371 | INFO     | Start Time: 2026-04-12 11:10:07
+2026-04-12 11:10:07,371 | INFO     | Python: 3.13.5 (main, Jun 25 2025, 18:55:22) [GCC 14.2.0]
+2026-04-12 11:10:07,372 | INFO     | ONNX Runtime: 1.24.2
+2026-04-12 11:10:07,372 | INFO     | Edge features: 71
+2026-04-12 11:10:07,372 | INFO     | Cloud features: 27
+2026-04-12 11:10:07,372 | INFO     | 
+2026-04-12 11:10:07,373 | INFO     | ================================================================================
+2026-04-12 11:10:07,373 | INFO     | LOADING ML MODELS
+2026-04-12 11:10:07,373 | INFO     | ================================================================================
+2026-04-12 11:10:07,374 | WARNING  | Model not found: models/mirai_model.onnx
+2026-04-12 11:10:07,374 | WARNING  |   Skipping mirai model
+2026-04-12 11:10:07,374 | WARNING  | Model not found: models/dos_model.onnx
+2026-04-12 11:10:07,374 | WARNING  |   Skipping dos model
+2026-04-12 11:10:07,374 | WARNING  | Model not found: models/replay_model.onnx
+2026-04-12 11:10:07,374 | WARNING  |   Skipping replay model
+2026-04-12 11:10:07,375 | WARNING  | Model not found: models/spoof_model.onnx
+2026-04-12 11:10:07,375 | WARNING  |   Skipping spoof model
+2026-04-12 11:10:07,375 | ERROR    | No models loaded! System cannot operate.
+2026-04-12 11:10:07,375 | ERROR    | Please ensure at least one model file is in the models/ directory
+2026-04-12 14:29:21,538 | INFO     | ================================================================================
+2026-04-12 14:29:21,538 | INFO     | EDGE ML MODULE - SEVERITY-BASED THREAT DETECTION v4.0
+2026-04-12 14:29:21,539 | INFO     | ================================================================================
+2026-04-12 14:29:21,539 | INFO     | Start Time: 2026-04-12 14:29:21
+2026-04-12 14:29:21,539 | INFO     | Python: 3.13.5 (main, Jun 25 2025, 18:55:22) [GCC 14.2.0]
+2026-04-12 14:29:21,539 | INFO     | ONNX Runtime: 1.24.2
+2026-04-12 14:29:21,539 | INFO     | Edge features: 71
+2026-04-12 14:29:21,540 | INFO     | Cloud features: 27
+2026-04-12 14:29:21,540 | INFO     | 
+2026-04-12 14:29:21,540 | INFO     | ================================================================================
+2026-04-12 14:29:21,540 | INFO     | LOADING ML MODELS
+2026-04-12 14:29:21,541 | INFO     | ================================================================================
+2026-04-12 14:29:22,074 | WARNING  |   mirai: Shape mismatch! Model expects 16, config has 19
+2026-04-12 14:29:22,075 | INFO     | 
+Loaded: Mirai Botnet Detection
+2026-04-12 14:29:22,075 | INFO     |   File: mirai_model.onnx
+2026-04-12 14:29:22,076 | INFO     |   Format: ONNX
+2026-04-12 14:29:22,076 | INFO     |   Input: float_input, Shape: [None, 16]
+2026-04-12 14:29:22,076 | INFO     |   Output: probabilities
+2026-04-12 14:29:22,076 | INFO     |   Features: 19
+2026-04-12 14:29:22,077 | INFO     |   Expected accuracy: 99.99%
+2026-04-12 14:29:22,077 | INFO     |   Target inference time: 1.71ms
+2026-04-12 14:29:22,077 | INFO     |   Key features:
+2026-04-12 14:29:22,077 | INFO     |     [0] flow_duration
+2026-04-12 14:29:22,077 | INFO     |     [1] rate
+2026-04-12 14:29:22,077 | INFO     |     [3] syn_count
+2026-04-12 14:29:22,078 | INFO     |     [5] rst_count
+2026-04-12 14:29:22,078 | INFO     |     [15] HTTP
+2026-04-12 14:29:22,078 | INFO     |     ... and 14 more
+2026-04-12 14:29:22,090 | INFO     | 
+Loaded: DoS Attack Detection
+2026-04-12 14:29:22,091 | INFO     |   File: dos_model.onnx
+2026-04-12 14:29:22,091 | INFO     |   Format: ONNX
+2026-04-12 14:29:22,091 | INFO     |   Input: float_input, Shape: [None, 18]
+2026-04-12 14:29:22,091 | INFO     |   Output: probabilities
+2026-04-12 14:29:22,091 | INFO     |   Features: 18
+2026-04-12 14:29:22,091 | INFO     |   Key features:
+2026-04-12 14:29:22,092 | INFO     |     [43] IAT
+2026-04-12 14:29:22,092 | INFO     |     [1] rate
+2026-04-12 14:29:22,092 | INFO     |     [66] Max
+2026-04-12 14:29:22,092 | INFO     |     [68] psh_flag_number
+2026-04-12 14:29:22,092 | INFO     |     [10] TCP
+2026-04-12 14:29:22,093 | INFO     |     ... and 13 more
+2026-04-12 14:29:23,342 | INFO     | 
+Loaded: Replay Attack Detection
+2026-04-12 14:29:23,342 | INFO     |   File: replay_model.onnx
+2026-04-12 14:29:23,343 | INFO     |   Format: ONNX
+2026-04-12 14:29:23,343 | INFO     |   Input: features, Shape: ['N', 13]
+2026-04-12 14:29:23,343 | INFO     |   Output: probabilities
+2026-04-12 14:29:23,344 | INFO     |   Features: 13
+2026-04-12 14:29:23,344 | INFO     |   Key features:
+2026-04-12 14:29:23,344 | INFO     |     [63] frame_time_delta_bin
+2026-04-12 14:29:23,344 | INFO     |     [47] frame.len
+2026-04-12 14:29:23,344 | INFO     |     [64] ip_len
+2026-04-12 14:29:23,345 | INFO     |     [56] ttl_value
+2026-04-12 14:29:23,345 | INFO     |     [57] ip_header_len
+2026-04-12 14:29:23,345 | INFO     |     ... and 8 more
+2026-04-12 14:29:23,401 | INFO     | 
+Loaded: Sniffing/Spoofing Detection
+2026-04-12 14:29:23,402 | INFO     |   File: spoof_model.onnx
+2026-04-12 14:29:23,402 | INFO     |   Format: ONNX
+2026-04-12 14:29:23,402 | INFO     |   Input: float_input, Shape: [None, 15]
+2026-04-12 14:29:23,402 | INFO     |   Output: probabilities
+2026-04-12 14:29:23,402 | INFO     |   Features: 15
+2026-04-12 14:29:23,403 | INFO     |   Key features:
+2026-04-12 14:29:23,403 | INFO     |     [56] ttl_value
+2026-04-12 14:29:23,403 | INFO     |     [3] syn_count
+2026-04-12 14:29:23,403 | INFO     |     [4] ack_count
+2026-04-12 14:29:23,403 | INFO     |     [5] rst_count
+2026-04-12 14:29:23,403 | INFO     |     [39] iat_mean
+2026-04-12 14:29:23,403 | INFO     |     ... and 10 more
+2026-04-12 14:29:23,404 | INFO     | 
+================================================================================
+2026-04-12 14:29:23,404 | INFO     | Successfully loaded 4 model(s)
+2026-04-12 14:29:23,404 | INFO     | Active models: mirai, dos, replay, spoof
+2026-04-12 14:29:23,404 | INFO     | ================================================================================
+2026-04-12 14:29:23,405 | INFO     | Connecting to MQTT broker at localhost:1883
+2026-04-12 14:29:23,407 | INFO     | 
+2026-04-12 14:29:23,407 | INFO     | ================================================================================
+2026-04-12 14:29:23,407 | INFO     | SEVERITY-BASED ISOLATION THRESHOLDS
+2026-04-12 14:29:23,407 | INFO     | ================================================================================
+2026-04-12 14:29:23,408 | INFO     |   Time Window: 60 seconds
+2026-04-12 14:29:23,408 | INFO     |   CRITICAL: ≥5 detections → Auto-Isolate
+2026-04-12 14:29:23,408 | INFO     |   HIGH:     ≥3 detections → Isolate + Alert
+2026-04-12 14:29:23,408 | INFO     |   MEDIUM:   ≥2 detections → Alert Only
+2026-04-12 14:29:23,408 | INFO     |   LOW:      1 detection → Log Only
+2026-04-12 14:29:23,408 | INFO     | 
+2026-04-12 14:29:23,409 | INFO     | ================================================================================
+2026-04-12 14:29:23,409 | INFO     | ✓ EDGE ML SYSTEM READY
+2026-04-12 14:29:23,409 | INFO     | ================================================================================
+2026-04-12 14:29:23,409 | INFO     | Listening on: metadata/extracted
+2026-04-12 14:29:23,409 | INFO     | Cloud topic:  cloud/metadata
+2026-04-12 14:29:23,409 | INFO     | 
+2026-04-12 14:29:23,410 | INFO     | Active Models:
+2026-04-12 14:29:23,410 | INFO     |   • Mirai Botnet Detection
+2026-04-12 14:29:23,410 | INFO     |   • DoS Attack Detection
+2026-04-12 14:29:23,410 | INFO     |   • Replay Attack Detection
+2026-04-12 14:29:23,410 | INFO     |   • Sniffing/Spoofing Detection
+2026-04-12 14:29:23,410 | INFO     | 
+2026-04-12 14:29:23,411 | INFO     | Press Ctrl+C to stop
+2026-04-12 14:29:23,411 | INFO     | ================================================================================
+2026-04-12 14:29:23,411 | INFO     | 
+2026-04-12 14:29:23,411 | INFO     | Connected to MQTT broker
+2026-04-12 14:29:23,412 | INFO     | Subscribed to metadata/extracted
+2026-04-12 14:29:29,656 | ERROR    | Error in mirai inference: [ONNXRuntimeError] : 2 : INVALID_ARGUMENT : Got invalid dimensions for input: float_input for the following indices
+ index: 1 Got: 19 Expected: 16
+ Please fix either the inputs/outputs or the model.
+2026-04-12 14:29:29,666 | ERROR    | Traceback (most recent call last):
+  File "/home/nomad/Safenode-EdgeSystem/EdgeProcessor/EdgeML.py", line 237, in predict
+    result = model.run([output_name], {input_name: features})
+  File "/usr/local/lib/python3.13/dist-packages/onnxruntime/capi/onnxruntime_inference_collection.py", line 296, in run
+    return self._sess.run(output_names, input_feed, run_options)
+           ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+onnxruntime.capi.onnxruntime_pybind11_state.InvalidArgument: [ONNXRuntimeError] : 2 : INVALID_ARGUMENT : Got invalid dimensions for input: float_input for the following indices
+ index: 1 Got: 19 Expected: 16
+ Please fix either the inputs/outputs or the model.
+
+2026-04-12 14:29:29,686 | INFO     | L DETECTION | Event: 59c76650 | Feature: 192.168.1.11:1883-192.168.1.12:46961/6 | Device: 192.168.1.11 | Attacks: dos(class_1), spoof(class_1) | Time: 18.14ms
+2026-04-12 14:29:29,687 | INFO     | MEDIUM | 192.168.1.11 | 2 detections | ALERT ONLY (no isolation)
+2026-04-12 14:29:29,694 | ERROR    | Error in mirai inference: [ONNXRuntimeError] : 2 : INVALID_ARGUMENT : Got invalid dimensions for input: float_input for the following indices
+ index: 1 Got: 19 Expected: 16
+ Please fix either the inputs/outputs or the model.
+2026-04-12 14:29:29,699 | ERROR    | Traceback (most recent call last):
+  File "/home/nomad/Safenode-EdgeSystem/EdgeProcessor/EdgeML.py", line 237, in predict
+    result = model.run([output_name], {input_name: features})
+  File "/usr/local/lib/python3.13/dist-packages/onnxruntime/capi/onnxruntime_inference_collection.py", line 296, in run
+    return self._sess.run(output_names, input_feed, run_options)
+           ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+onnxruntime.capi.onnxruntime_pybind11_state.InvalidArgument: [ONNXRuntimeError] : 2 : INVALID_ARGUMENT : Got invalid dimensions for input: float_input for the following indices
+ index: 1 Got: 19 Expected: 16
+ Please fix either the inputs/outputs or the model.
+
+2026-04-12 14:29:29,709 | INFO     | L DETECTION | Event: 2394fe70 | Feature: 192.168.1.5:65506-255.255.255.255:65506/17 | Device: 192.168.1.5 | Attacks: spoof(class_1) | Time: 2.29ms
+2026-04-12 14:29:29,714 | ERROR    | Error in mirai inference: [ONNXRuntimeError] : 2 : INVALID_ARGUMENT : Got invalid dimensions for input: float_input for the following indices
+ index: 1 Got: 19 Expected: 16
+ Please fix either the inputs/outputs or the model.
+2026-04-12 14:29:29,721 | ERROR    | Traceback (most recent call last):
+  File "/home/nomad/Safenode-EdgeSystem/EdgeProcessor/EdgeML.py", line 237, in predict
+    result = model.run([output_name], {input_name: features})
+  File "/usr/local/lib/python3.13/dist-packages/onnxruntime/capi/onnxruntime_inference_collection.py", line 296, in run
+    return self._sess.run(output_names, input_feed, run_options)
+           ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+onnxruntime.capi.onnxruntime_pybind11_state.InvalidArgument: [ONNXRuntimeError] : 2 : INVALID_ARGUMENT : Got invalid dimensions for input: float_input for the following indices
+ index: 1 Got: 19 Expected: 16
+ Please fix either the inputs/outputs or the model.
+
+2026-04-12 14:29:29,728 | INFO     | L DETECTION | Event: 46bb4482 | Feature: 192.168.1.12:46956-68.183.90.120:443/6 | Device: 192.168.1.12 | Attacks: dos(class_1) | Time: 1.39ms
+2026-04-12 14:29:29,730 | ERROR    | Error in mirai inference: [ONNXRuntimeError] : 2 : INVALID_ARGUMENT : Got invalid dimensions for input: float_input for the following indices
+ index: 1 Got: 19 Expected: 16
+ Please fix either the inputs/outputs or the model.
+2026-04-12 14:29:29,732 | ERROR    | Traceback (most recent call last):
+  File "/home/nomad/Safenode-EdgeSystem/EdgeProcessor/EdgeML.py", line 237, in predict
+    result = model.run([output_name], {input_name: features})
+  File "/usr/local/lib/python3.13/dist-packages/onnxruntime/capi/onnxruntime_inference_collection.py", line 296, in run
+    return self._sess.run(output_names, input_feed, run_options)
+           ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+onnxruntime.capi.onnxruntime_pybind11_state.InvalidArgument: [ONNXRuntimeError] : 2 : INVALID_ARGUMENT : Got invalid dimensions for input: float_input for the following indices
+ index: 1 Got: 19 Expected: 16
+ Please fix either the inputs/outputs or the model.
+
+2026-04-12 14:29:29,735 | INFO     | L DETECTION | Event: 6ee0b746 | Feature: 192.168.1.12:49432-192.200.0.108:80/6 | Device: 192.168.1.12 | Attacks: dos(class_1) | Time: 1.05ms
+2026-04-12 14:29:29,735 | INFO     | MEDIUM | 192.168.1.12 | 2 detections | ALERT ONLY (no isolation)
+2026-04-12 14:29:29,737 | ERROR    | Error in mirai inference: [ONNXRuntimeError] : 2 : INVALID_ARGUMENT : Got invalid dimensions for input: float_input for the following indices
+ index: 1 Got: 19 Expected: 16
+ Please fix either the inputs/outputs or the model.
+2026-04-12 14:29:29,739 | ERROR    | Traceback (most recent call last):
+  File "/home/nomad/Safenode-EdgeSystem/EdgeProcessor/EdgeML.py", line 237, in predict
+    result = model.run([output_name], {input_name: features})
+  File "/usr/local/lib/python3.13/dist-packages/onnxruntime/capi/onnxruntime_inference_collection.py", line 296, in run
+    return self._sess.run(output_names, input_feed, run_options)
+           ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+onnxruntime.capi.onnxruntime_pybind11_state.InvalidArgument: [ONNXRuntimeError] : 2 : INVALID_ARGUMENT : Got invalid dimensions for input: float_input for the following indices
+ index: 1 Got: 19 Expected: 16
+ Please fix either the inputs/outputs or the model.
+
+2026-04-12 14:29:29,743 | ERROR    | Error in mirai inference: [ONNXRuntimeError] : 2 : INVALID_ARGUMENT : Got invalid dimensions for input: float_input for the following indices
+ index: 1 Got: 19 Expected: 16
+ Please fix either the inputs/outputs or the model.
+2026-04-12 14:29:29,746 | ERROR    | Traceback (most recent call last):
+  File "/home/nomad/Safenode-EdgeSystem/EdgeProcessor/EdgeML.py", line 237, in predict
+    result = model.run([output_name], {input_name: features})
+  File "/usr/local/lib/python3.13/dist-packages/onnxruntime/capi/onnxruntime_inference_collection.py", line 296, in run
+    return self._sess.run(output_names, input_feed, run_options)
+           ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+onnxruntime.capi.onnxruntime_pybind11_state.InvalidArgument: [ONNXRuntimeError] : 2 : INVALID_ARGUMENT : Got invalid dimensions for input: float_input for the following indices
+ index: 1 Got: 19 Expected: 16
+ Please fix either the inputs/outputs or the model.
+
+2026-04-12 14:29:29,750 | INFO     | L DETECTION | Event: 315f7e06 | Feature: 192.168.1.12:57732-199.165.136.101:443/6 | Device: 192.168.1.12 | Attacks: dos(class_1), replay(class_1) | Time: 1.44ms
+2026-04-12 14:29:29,751 | WARNING  | HIGH | 192.168.1.12 | 3 detections | ISOLATING + ALERT
+2026-04-12 14:29:29,751 | INFO     | Isolation triggered for 192.168.1.12 | severity=HIGH | reason=3 detections - ISOLATE + ALERT
+2026-04-12 14:29:38,559 | ERROR    | Error in mirai inference: [ONNXRuntimeError] : 2 : INVALID_ARGUMENT : Got invalid dimensions for input: float_input for the following indices
+ index: 1 Got: 19 Expected: 16
+ Please fix either the inputs/outputs or the model.
+2026-04-12 14:29:38,563 | ERROR    | Traceback (most recent call last):
+  File "/home/nomad/Safenode-EdgeSystem/EdgeProcessor/EdgeML.py", line 237, in predict
+    result = model.run([output_name], {input_name: features})
+  File "/usr/local/lib/python3.13/dist-packages/onnxruntime/capi/onnxruntime_inference_collection.py", line 296, in run
+    return self._sess.run(output_names, input_feed, run_options)
+           ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+onnxruntime.capi.onnxruntime_pybind11_state.InvalidArgument: [ONNXRuntimeError] : 2 : INVALID_ARGUMENT : Got invalid dimensions for input: float_input for the following indices
+ index: 1 Got: 19 Expected: 16
+ Please fix either the inputs/outputs or the model.
+
+2026-04-12 14:29:40,577 | ERROR    | Error in mirai inference: [ONNXRuntimeError] : 2 : INVALID_ARGUMENT : Got invalid dimensions for input: float_input for the following indices
+ index: 1 Got: 19 Expected: 16
+ Please fix either the inputs/outputs or the model.
+2026-04-12 14:29:40,579 | ERROR    | Traceback (most recent call last):
+  File "/home/nomad/Safenode-EdgeSystem/EdgeProcessor/EdgeML.py", line 237, in predict
+    result = model.run([output_name], {input_name: features})
+  File "/usr/local/lib/python3.13/dist-packages/onnxruntime/capi/onnxruntime_inference_collection.py", line 296, in run
+    return self._sess.run(output_names, input_feed, run_options)
+           ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+onnxruntime.capi.onnxruntime_pybind11_state.InvalidArgument: [ONNXRuntimeError] : 2 : INVALID_ARGUMENT : Got invalid dimensions for input: float_input for the following indices
+ index: 1 Got: 19 Expected: 16
+ Please fix either the inputs/outputs or the model.
+
+2026-04-12 14:29:40,581 | INFO     | L DETECTION | Event: 0e171295 | Feature: 192.168.1.12:41641-192.168.1.4:41641/17 | Device: 192.168.1.12 | Attacks: spoof(class_1) | Time: 1.25ms
+2026-04-12 14:29:40,591 | ERROR    | Error in mirai inference: [ONNXRuntimeError] : 2 : INVALID_ARGUMENT : Got invalid dimensions for input: float_input for the following indices
+ index: 1 Got: 19 Expected: 16
+ Please fix either the inputs/outputs or the model.
+2026-04-12 14:29:40,593 | ERROR    | Traceback (most recent call last):
+  File "/home/nomad/Safenode-EdgeSystem/EdgeProcessor/EdgeML.py", line 237, in predict
+    result = model.run([output_name], {input_name: features})
+  File "/usr/local/lib/python3.13/dist-packages/onnxruntime/capi/onnxruntime_inference_collection.py", line 296, in run
+    return self._sess.run(output_names, input_feed, run_options)
+           ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+onnxruntime.capi.onnxruntime_pybind11_state.InvalidArgument: [ONNXRuntimeError] : 2 : INVALID_ARGUMENT : Got invalid dimensions for input: float_input for the following indices
+ index: 1 Got: 19 Expected: 16
+ Please fix either the inputs/outputs or the model.
+
+2026-04-12 14:29:40,596 | INFO     | L DETECTION | Event: 2a8d754e | Feature: 192.168.1.12:57732-199.165.136.101:443/6 | Device: 192.168.1.12 | Attacks: dos(class_1), replay(class_1) | Time: 2.11ms
+2026-04-12 14:29:40,598 | ERROR    | Error in mirai inference: [ONNXRuntimeError] : 2 : INVALID_ARGUMENT : Got invalid dimensions for input: float_input for the following indices
+ index: 1 Got: 19 Expected: 16
+ Please fix either the inputs/outputs or the model.
+2026-04-12 14:29:40,600 | ERROR    | Traceback (most recent call last):
+  File "/home/nomad/Safenode-EdgeSystem/EdgeProcessor/EdgeML.py", line 237, in predict
+    result = model.run([output_name], {input_name: features})
+  File "/usr/local/lib/python3.13/dist-packages/onnxruntime/capi/onnxruntime_inference_collection.py", line 296, in run
+    return self._sess.run(output_names, input_feed, run_options)
+           ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+onnxruntime.capi.onnxruntime_pybind11_state.InvalidArgument: [ONNXRuntimeError] : 2 : INVALID_ARGUMENT : Got invalid dimensions for input: float_input for the following indices
+ index: 1 Got: 19 Expected: 16
+ Please fix either the inputs/outputs or the model.
+
+2026-04-12 14:29:40,603 | INFO     | L DETECTION | Event: 9f0c6543 | Feature: 192.168.1.11:1883-192.168.1.12:46961/6 | Device: 192.168.1.11 | Attacks: dos(class_1), spoof(class_1) | Time: 1.37ms
+2026-04-12 14:29:40,603 | WARNING  | HIGH | 192.168.1.11 | 3 detections | ISOLATING + ALERT
+2026-04-12 14:29:40,603 | INFO     | Isolation triggered for 192.168.1.11 | severity=HIGH | reason=3 detections - ISOLATE + ALERT
+2026-04-12 14:29:42,905 | INFO     | 
+
+Shutdown requested by user
+2026-04-12 14:29:42,906 | INFO     | 
+================================================================================
+2026-04-12 14:29:42,907 | INFO     | FINAL STATISTICS
+2026-04-12 14:29:42,907 | INFO     | ================================================================================
+2026-04-12 14:29:42,907 | INFO     | 
+Message Processing:
+2026-04-12 14:29:42,907 | INFO     |   Messages received: 10
+2026-04-12 14:29:42,907 | INFO     |   Threats detected: 8
+2026-04-12 14:29:42,908 | INFO     |   Isolations triggered: 2
+2026-04-12 14:29:42,908 | INFO     | 
+ML Detection Stats:
+2026-04-12 14:29:42,908 | INFO     |   Total flows processed: 10
+2026-04-12 14:29:42,908 | INFO     |   Threats by model:
+2026-04-12 14:29:42,908 | INFO     |     dos         : 6 threats
+2026-04-12 14:29:42,908 | INFO     |     replay      : 2 threats
+2026-04-12 14:29:42,909 | INFO     |     spoof       : 4 threats
+2026-04-12 14:29:42,909 | INFO     | 
+Severity Stats:
+2026-04-12 14:29:42,909 | INFO     |   Total detections recorded: 12
+2026-04-12 14:29:42,909 | INFO     |   CRITICAL events: 3
+2026-04-12 14:29:42,909 | INFO     |   HIGH events: 4
+2026-04-12 14:29:42,909 | INFO     |   MEDIUM events: 2
+2026-04-12 14:29:42,909 | INFO     |   LOW events: 3
+2026-04-12 14:29:42,909 | INFO     |   False positives marked: 0
+2026-04-12 14:29:42,910 | INFO     | 
+Average inference times:
+2026-04-12 14:29:42,910 | INFO     |   mirai       : 0.00ms
+2026-04-12 14:29:42,910 | INFO     |   dos         : 0.87ms
+2026-04-12 14:29:42,910 | INFO     |   replay      : 1.01ms
+2026-04-12 14:29:42,910 | INFO     |   spoof       : 1.41ms
+2026-04-12 14:29:42,910 | INFO     | 
+================================================================================
+2026-04-12 14:29:42,910 | INFO     | Edge ML system stopped cleanly
+2026-04-12 14:29:42,911 | INFO     | ================================================================================
+2026-04-12 14:42:18,707 | INFO     | ================================================================================
+2026-04-12 14:42:18,707 | INFO     | EDGE ML MODULE - SEVERITY-BASED THREAT DETECTION v4.0
+2026-04-12 14:42:18,708 | INFO     | ================================================================================
+2026-04-12 14:42:18,708 | INFO     | Start Time: 2026-04-12 14:42:18
+2026-04-12 14:42:18,708 | INFO     | Python: 3.13.5 (main, Jun 25 2025, 18:55:22) [GCC 14.2.0]
+2026-04-12 14:42:18,708 | INFO     | ONNX Runtime: 1.24.2
+2026-04-12 14:42:18,709 | INFO     | Edge features: 71
+2026-04-12 14:42:18,709 | INFO     | Cloud features: 27
+2026-04-12 14:42:18,709 | INFO     | 
+2026-04-12 14:42:18,709 | INFO     | ================================================================================
+2026-04-12 14:42:18,709 | INFO     | LOADING ML MODELS
+2026-04-12 14:42:18,710 | INFO     | ================================================================================
+2026-04-12 14:42:19,075 | INFO     | 
+Loaded: Mirai Botnet Detection
+2026-04-12 14:42:19,075 | INFO     |   File: mirai_model.onnx
+2026-04-12 14:42:19,076 | INFO     |   Format: ONNX
+2026-04-12 14:42:19,076 | INFO     |   Input: float_input, Shape: [None, 16]
+2026-04-12 14:42:19,076 | INFO     |   Output: probabilities
+2026-04-12 14:42:19,076 | INFO     |   Features: 16
+2026-04-12 14:42:19,077 | INFO     |   Expected accuracy: 99.99%
+2026-04-12 14:42:19,077 | INFO     |   Target inference time: 1.71ms
+2026-04-12 14:42:19,077 | INFO     |   Key features:
+2026-04-12 14:42:19,077 | INFO     |     [0] flow_duration
+2026-04-12 14:42:19,077 | INFO     |     [1] rate
+2026-04-12 14:42:19,077 | INFO     |     [3] syn_count
+2026-04-12 14:42:19,077 | INFO     |     [5] rst_count
+2026-04-12 14:42:19,077 | INFO     |     [15] HTTP
+2026-04-12 14:42:19,077 | INFO     |     ... and 11 more
+2026-04-12 14:42:19,085 | INFO     | 
+Loaded: DoS Attack Detection
+2026-04-12 14:42:19,085 | INFO     |   File: dos_model.onnx
+2026-04-12 14:42:19,086 | INFO     |   Format: ONNX
+2026-04-12 14:42:19,086 | INFO     |   Input: float_input, Shape: [None, 18]
+2026-04-12 14:42:19,087 | INFO     |   Output: probabilities
+2026-04-12 14:42:19,087 | INFO     |   Features: 18
+2026-04-12 14:42:19,088 | INFO     |   Key features:
+2026-04-12 14:42:19,089 | INFO     |     [43] IAT
+2026-04-12 14:42:19,089 | INFO     |     [1] rate
+2026-04-12 14:42:19,090 | INFO     |     [66] Max
+2026-04-12 14:42:19,091 | INFO     |     [68] psh_flag_number
+2026-04-12 14:42:19,091 | INFO     |     [10] TCP
+2026-04-12 14:42:19,092 | INFO     |     ... and 13 more
+2026-04-12 14:42:20,318 | INFO     | 
+Loaded: Replay Attack Detection
+2026-04-12 14:42:20,318 | INFO     |   File: replay_model.onnx
+2026-04-12 14:42:20,319 | INFO     |   Format: ONNX
+2026-04-12 14:42:20,319 | INFO     |   Input: features, Shape: ['N', 13]
+2026-04-12 14:42:20,319 | INFO     |   Output: probabilities
+2026-04-12 14:42:20,319 | INFO     |   Features: 13
+2026-04-12 14:42:20,320 | INFO     |   Key features:
+2026-04-12 14:42:20,320 | INFO     |     [63] frame_time_delta_bin
+2026-04-12 14:42:20,320 | INFO     |     [47] frame.len
+2026-04-12 14:42:20,320 | INFO     |     [64] ip_len
+2026-04-12 14:42:20,321 | INFO     |     [56] ttl_value
+2026-04-12 14:42:20,321 | INFO     |     [57] ip_header_len
+2026-04-12 14:42:20,321 | INFO     |     ... and 8 more
+2026-04-12 14:42:20,360 | INFO     | 
+Loaded: Sniffing/Spoofing Detection
+2026-04-12 14:42:20,361 | INFO     |   File: spoof_model.onnx
+2026-04-12 14:42:20,361 | INFO     |   Format: ONNX
+2026-04-12 14:42:20,361 | INFO     |   Input: float_input, Shape: [None, 15]
+2026-04-12 14:42:20,362 | INFO     |   Output: probabilities
+2026-04-12 14:42:20,362 | INFO     |   Features: 15
+2026-04-12 14:42:20,362 | INFO     |   Key features:
+2026-04-12 14:42:20,362 | INFO     |     [56] ttl_value
+2026-04-12 14:42:20,363 | INFO     |     [3] syn_count
+2026-04-12 14:42:20,363 | INFO     |     [4] ack_count
+2026-04-12 14:42:20,363 | INFO     |     [5] rst_count
+2026-04-12 14:42:20,363 | INFO     |     [39] iat_mean
+2026-04-12 14:42:20,364 | INFO     |     ... and 10 more
+2026-04-12 14:42:20,364 | INFO     | 
+================================================================================
+2026-04-12 14:42:20,365 | INFO     | Successfully loaded 4 model(s)
+2026-04-12 14:42:20,365 | INFO     | Active models: mirai, dos, replay, spoof
+2026-04-12 14:42:20,365 | INFO     | ================================================================================
+2026-04-12 14:42:20,366 | INFO     | Connecting to MQTT broker at localhost:1883
+2026-04-12 14:42:20,369 | INFO     | 
+2026-04-12 14:42:20,369 | INFO     | ================================================================================
+2026-04-12 14:42:20,369 | INFO     | SEVERITY-BASED ISOLATION THRESHOLDS
+2026-04-12 14:42:20,369 | INFO     | ================================================================================
+2026-04-12 14:42:20,370 | INFO     |   Time Window: 60 seconds
+2026-04-12 14:42:20,370 | INFO     |   CRITICAL: ≥5 detections → Auto-Isolate
+2026-04-12 14:42:20,370 | INFO     |   HIGH:     ≥3 detections → Isolate + Alert
+2026-04-12 14:42:20,371 | INFO     |   MEDIUM:   ≥2 detections → Alert Only
+2026-04-12 14:42:20,371 | INFO     |   LOW:      1 detection → Log Only
+2026-04-12 14:42:20,371 | INFO     | 
+2026-04-12 14:42:20,371 | INFO     | ================================================================================
+2026-04-12 14:42:20,372 | INFO     | ✓ EDGE ML SYSTEM READY
+2026-04-12 14:42:20,372 | INFO     | ================================================================================
+2026-04-12 14:42:20,372 | INFO     | Listening on: metadata/extracted
+2026-04-12 14:42:20,373 | INFO     | Cloud topic:  cloud/metadata
+2026-04-12 14:42:20,373 | INFO     | 
+2026-04-12 14:42:20,373 | INFO     | Active Models:
+2026-04-12 14:42:20,374 | INFO     |   • Mirai Botnet Detection
+2026-04-12 14:42:20,374 | INFO     |   • DoS Attack Detection
+2026-04-12 14:42:20,375 | INFO     |   • Replay Attack Detection
+2026-04-12 14:42:20,375 | INFO     |   • Sniffing/Spoofing Detection
+2026-04-12 14:42:20,375 | INFO     | 
+2026-04-12 14:42:20,376 | INFO     | Press Ctrl+C to stop
+2026-04-12 14:42:20,376 | INFO     | ================================================================================
+2026-04-12 14:42:20,376 | INFO     | 
+2026-04-12 14:42:20,377 | INFO     | Connected to MQTT broker
+2026-04-12 14:42:20,378 | INFO     | Subscribed to metadata/extracted
+2026-04-12 14:42:24,904 | INFO     | L DETECTION | Event: 8dadb7ee | Feature: 192.168.1.12:49432-192.200.0.108:80/6 | Device: 192.168.1.12 | Attacks: mirai(Mirai-greip_flood), dos(class_1) | Time: 4.11ms
+2026-04-12 14:42:24,905 | INFO     | MEDIUM | 192.168.1.12 | 1 detections | ALERT ONLY (no isolation)
+2026-04-12 14:42:24,906 | INFO     | MEDIUM | 192.168.1.12 | 2 detections | ALERT ONLY (no isolation)
+2026-04-12 14:42:24,913 | INFO     | L DETECTION | Event: 186a75e3 | Feature: 192.168.1.5:65506-255.255.255.255:65506/17 | Device: 192.168.1.5 | Attacks: mirai(Mirai-greeth_flood), spoof(class_1) | Time: 4.04ms
+2026-04-12 14:42:24,921 | INFO     | L DETECTION | Event: fbb10009 | Feature: 192.168.1.12:41641-192.168.1.4:41641/17 | Device: 192.168.1.12 | Attacks: mirai(Mirai-udpplain) | Time: 4.23ms
+2026-04-12 14:42:24,928 | INFO     | L DETECTION | Event: 6905db5c | Feature: 192.168.1.6:65506-255.255.255.255:65506/17 | Device: 192.168.1.6 | Attacks: mirai(Mirai-greip_flood), spoof(class_1) | Time: 3.78ms
+2026-04-12 14:42:24,929 | INFO     | MEDIUM | 192.168.1.6 | 1 detections | ALERT ONLY (no isolation)
+2026-04-12 14:42:24,930 | INFO     | MEDIUM | 192.168.1.6 | 2 detections | ALERT ONLY (no isolation)
+2026-04-12 14:42:24,937 | INFO     | L DETECTION | Event: 12ee3040 | Feature: 192.168.1.11:1883-192.168.1.12:46961/6 | Device: 192.168.1.11 | Attacks: mirai(Mirai-greeth_flood), dos(class_1), spoof(class_1) | Time: 4.44ms
+2026-04-12 14:42:24,938 | INFO     | MEDIUM | 192.168.1.11 | 1 detections | ALERT ONLY (no isolation)
+2026-04-12 14:42:24,939 | INFO     | MEDIUM | 192.168.1.11 | 2 detections | ALERT ONLY (no isolation)
+2026-04-12 14:42:24,940 | WARNING  | HIGH | 192.168.1.11 | 3 detections | ISOLATING + ALERT
+2026-04-12 14:42:24,941 | INFO     | Isolation triggered for 192.168.1.11 | severity=HIGH | reason=3 detections - ISOLATE + ALERT
+2026-04-12 14:42:24,948 | INFO     | L DETECTION | Event: c470765b | Feature: 192.168.1.12:57732-199.165.136.101:443/6 | Device: 192.168.1.12 | Attacks: mirai(Mirai-greip_flood), dos(class_1), replay(class_1) | Time: 3.86ms
+2026-04-12 14:42:24,950 | WARNING  | HIGH | 192.168.1.12 | 3 detections | ISOLATING + ALERT
+2026-04-12 14:42:24,951 | INFO     | Isolation triggered for 192.168.1.12 | severity=HIGH | reason=3 detections - ISOLATE + ALERT
+2026-04-12 14:42:35,291 | INFO     | L DETECTION | Event: 99370942 | Feature: 192.168.1.12:46956-68.183.90.120:443/6 | Device: 192.168.1.12 | Attacks: mirai(Mirai-greip_flood), dos(class_1) | Time: 3.33ms
+2026-04-12 14:42:35,298 | INFO     | L DETECTION | Event: b92c74a5 | Feature: 192.168.1.1:5351-192.168.1.12:40556/17 | Device: 192.168.1.1 | Attacks: mirai(Mirai-greip_flood), spoof(class_1) | Time: 3.45ms
+2026-04-12 14:42:35,299 | INFO     | MEDIUM | 192.168.1.1 | 1 detections | ALERT ONLY (no isolation)
+2026-04-12 14:42:35,300 | INFO     | MEDIUM | 192.168.1.1 | 2 detections | ALERT ONLY (no isolation)
+2026-04-12 14:42:35,315 | INFO     | L DETECTION | Event: 337ee731 | Feature: 192.168.1.12:41641-192.168.1.4:41641/17 | Device: 192.168.1.12 | Attacks: mirai(Mirai-greip_flood) | Time: 11.21ms
+2026-04-12 14:42:35,324 | INFO     | L DETECTION | Event: ab9ea8dc | Feature: 172.237.72.8:3478-192.168.1.12:41641/17 | Device: 172.237.72.8 | Attacks: mirai(Mirai-greip_flood) | Time: 3.86ms
+2026-04-12 14:42:35,343 | INFO     | L DETECTION | Event: f9207545 | Feature: 192.168.1.12:41641-68.183.90.120:3478/17 | Device: 192.168.1.12 | Attacks: mirai(Mirai-greip_flood) | Time: 15.40ms
+2026-04-12 14:42:35,351 | INFO     | L DETECTION | Event: 95ab7739 | Feature: 185.34.3.232:3478-192.168.1.12:41641/17 | Device: 185.34.3.232 | Attacks: mirai(Mirai-greip_flood) | Time: 3.53ms
+2026-04-12 14:42:35,359 | INFO     | L DETECTION | Event: 6c5fd49b | Feature: 192.168.1.11:1883-192.168.1.12:46961/6 | Device: 192.168.1.11 | Attacks: mirai(Mirai-greip_flood), dos(class_1), spoof(class_1) | Time: 4.06ms
+2026-04-12 14:42:35,367 | INFO     | L DETECTION | Event: 886d4cfb | Feature: 192.168.1.1:0-192.168.1.12:0/1 | Device: 192.168.1.1 | Attacks: mirai(Mirai-greip_flood) | Time: 3.48ms
+2026-04-12 14:42:35,368 | WARNING  | CRITICAL | 192.168.1.1 | 3 detections in 60s | AUTO-ISOLATING
+2026-04-12 14:42:35,369 | INFO     | Isolation triggered for 192.168.1.1 | severity=CRITICAL | reason=3 detections - AUTO ISOLATE
+2026-04-12 14:42:35,376 | INFO     | L DETECTION | Event: 7e63c20f | Feature: 192.168.1.12:57732-199.165.136.101:443/6 | Device: 192.168.1.12 | Attacks: mirai(Mirai-greip_flood), dos(class_1), replay(class_1) | Time: 2.94ms
+2026-04-12 14:42:38,809 | INFO     | L DETECTION | Event: c91f1d3e | Feature: 192.168.1.12:41641-192.168.1.4:41641/17 | Device: 192.168.1.12 | Attacks: mirai(Mirai-greip_flood) | Time: 2.36ms
+2026-04-12 14:42:38,813 | INFO     | L DETECTION | Event: 46263e86 | Feature: 172.237.72.8:3478-192.168.1.12:41641/17 | Device: 172.237.72.8 | Attacks: mirai(Mirai-greip_flood) | Time: 2.59ms
+2026-04-12 14:42:38,825 | INFO     | L DETECTION | Event: cfa5b4f2 | Feature: 192.168.1.12:41641-68.183.90.120:3478/17 | Device: 192.168.1.12 | Attacks: mirai(Mirai-greip_flood) | Time: 9.96ms
+2026-04-12 14:42:38,841 | INFO     | L DETECTION | Event: 44d29854 | Feature: 185.34.3.232:3478-192.168.1.12:41641/17 | Device: 185.34.3.232 | Attacks: mirai(Mirai-greip_flood) | Time: 13.90ms
+2026-04-12 14:42:38,846 | INFO     | L DETECTION | Event: 7a9755cd | Feature: 192.168.1.1:5351-192.168.1.12:51928/17 | Device: 192.168.1.1 | Attacks: mirai(Mirai-greip_flood), spoof(class_1) | Time: 2.68ms
+2026-04-12 14:42:38,850 | INFO     | L DETECTION | Event: 19ec1088 | Feature: 192.168.1.6:65506-255.255.255.255:65506/17 | Device: 192.168.1.6 | Attacks: mirai(Mirai-greip_flood), spoof(class_1) | Time: 2.50ms
+2026-04-12 14:42:38,851 | WARNING  | CRITICAL | 192.168.1.6 | 3 detections in 60s | AUTO-ISOLATING
+2026-04-12 14:42:38,852 | INFO     | Isolation triggered for 192.168.1.6 | severity=CRITICAL | reason=3 detections - AUTO ISOLATE
+2026-04-12 14:42:38,856 | INFO     | L DETECTION | Event: 18af1f11 | Feature: 192.168.1.11:138-192.168.1.255:138/17 | Device: 192.168.1.11 | Attacks: mirai(Mirai-greip_flood), spoof(class_1) | Time: 2.46ms
+2026-04-12 14:42:38,860 | INFO     | L DETECTION | Event: 5bd924c4 | Feature: 100.92.157.175:41641-192.168.1.12:41641/17 | Device: 100.92.157.175 | Attacks: mirai(Mirai-greeth_flood) | Time: 2.13ms
+2026-04-12 14:42:38,864 | INFO     | L DETECTION | Event: ba78aff9 | Feature: 112.134.228.237:32331-192.168.1.12:41641/17 | Device: 112.134.228.237 | Attacks: mirai(Mirai-greip_flood) | Time: 2.12ms
+2026-04-12 14:42:38,865 | INFO     | MEDIUM | 112.134.228.237 | 1 detections | ALERT ONLY (no isolation)
+2026-04-12 14:42:38,869 | INFO     | L DETECTION | Event: b182ca82 | Feature: 100.92.157.175:47478-192.168.1.12:41641/17 | Device: 100.92.157.175 | Attacks: mirai(Mirai-greip_flood) | Time: 2.68ms
+2026-04-12 14:42:38,870 | INFO     | MEDIUM | 100.92.157.175 | 1 detections | ALERT ONLY (no isolation)
+2026-04-12 14:42:47,498 | INFO     | L DETECTION | Event: 539cbd98 | Feature: 192.168.1.12:41641-192.168.1.4:41641/17 | Device: 192.168.1.12 | Attacks: mirai(Mirai-greeth_flood) | Time: 3.77ms
+2026-04-12 14:42:47,507 | INFO     | L DETECTION | Event: 0b566118 | Feature: 192.168.1.11:1883-192.168.1.12:46961/6 | Device: 192.168.1.11 | Attacks: mirai(Mirai-greip_flood), dos(class_1), spoof(class_1) | Time: 3.92ms
+2026-04-12 14:42:47,516 | INFO     | L DETECTION | Event: e7240221 | Feature: 192.168.1.12:57732-199.165.136.101:443/6 | Device: 192.168.1.12 | Attacks: mirai(Mirai-greip_flood), dos(class_1), replay(class_1) | Time: 3.73ms
+2026-04-12 14:42:47,523 | INFO     | L DETECTION | Event: adbb93f5 | Feature: 192.168.1.12:49432-192.200.0.108:80/6 | Device: 192.168.1.12 | Attacks: mirai(Mirai-greip_flood), dos(class_1) | Time: 3.84ms
+2026-04-12 14:42:57,619 | INFO     | L DETECTION | Event: 5df5ca7f | Feature: 192.168.1.1:5351-192.168.1.12:56395/17 | Device: 192.168.1.1 | Attacks: mirai(Mirai-greip_flood), spoof(class_1) | Time: 3.20ms
+2026-04-12 14:42:57,633 | INFO     | L DETECTION | Event: 7f74ad8c | Feature: 185.34.3.232:3478-192.168.1.12:41641/17 | Device: 185.34.3.232 | Attacks: mirai(Mirai-greip_flood) | Time: 3.51ms
+2026-04-12 14:42:57,645 | INFO     | L DETECTION | Event: 260c27ea | Feature: 192.168.1.11:1883-192.168.1.12:46961/6 | Device: 192.168.1.11 | Attacks: mirai(Mirai-greip_flood), dos(class_1), spoof(class_1) | Time: 6.34ms
+2026-04-12 14:42:57,653 | INFO     | L DETECTION | Event: 709d2b6f | Feature: 192.168.1.1:0-192.168.1.12:0/1 | Device: 192.168.1.1 | Attacks: mirai(Mirai-greip_flood) | Time: 3.41ms
+2026-04-12 14:42:57,662 | INFO     | L DETECTION | Event: 6fb499e5 | Feature: 192.168.1.12:57732-199.165.136.101:443/6 | Device: 192.168.1.12 | Attacks: mirai(Mirai-greip_flood), dos(class_1), replay(class_1) | Time: 4.20ms
+2026-04-12 14:42:57,681 | INFO     | L DETECTION | Event: 4bcf8177 | Feature: 192.168.1.12:49432-192.200.0.108:80/6 | Device: 192.168.1.12 | Attacks: mirai(Mirai-greip_flood), dos(class_1) | Time: 15.25ms
+2026-04-12 14:42:57,688 | INFO     | L DETECTION | Event: 071d7cf2 | Feature: 192.168.1.5:65506-255.255.255.255:65506/17 | Device: 192.168.1.5 | Attacks: mirai(Mirai-greip_flood), spoof(class_1) | Time: 3.17ms
+2026-04-12 14:42:57,688 | WARNING  | HIGH | 192.168.1.5 | 2 detections | ISOLATING + ALERT
+2026-04-12 14:42:57,689 | INFO     | Isolation triggered for 192.168.1.5 | severity=HIGH | reason=2 detections - ISOLATE + ALERT
+2026-04-12 14:42:57,693 | INFO     | L DETECTION | Event: 2a4e4ec3 | Feature: 192.168.1.12:41641-192.168.1.4:41641/17 | Device: 192.168.1.12 | Attacks: mirai(Mirai-greip_flood) | Time: 2.58ms
+2026-04-12 14:42:59,595 | INFO     | 
+
+Shutdown requested by user
+2026-04-12 14:42:59,596 | INFO     | 
+================================================================================
+2026-04-12 14:42:59,596 | INFO     | FINAL STATISTICS
+2026-04-12 14:42:59,596 | INFO     | ================================================================================
+2026-04-12 14:42:59,596 | INFO     | 
+Message Processing:
+2026-04-12 14:42:59,597 | INFO     |   Messages received: 39
+2026-04-12 14:42:59,597 | INFO     |   Threats detected: 37
+2026-04-12 14:42:59,597 | INFO     |   Isolations triggered: 5
+2026-04-12 14:42:59,597 | INFO     | 
+ML Detection Stats:
+2026-04-12 14:42:59,597 | INFO     |   Total flows processed: 39
+2026-04-12 14:42:59,597 | INFO     |   Threats by model:
+2026-04-12 14:42:59,597 | INFO     |     dos         : 12 threats
+2026-04-12 14:42:59,598 | INFO     |     mirai       : 37 threats
+2026-04-12 14:42:59,598 | INFO     |     replay      : 4 threats
+2026-04-12 14:42:59,598 | INFO     |     spoof       : 12 threats
+2026-04-12 14:42:59,598 | INFO     | 
+Severity Stats:
+2026-04-12 14:42:59,598 | INFO     |   Total detections recorded: 49
+2026-04-12 14:42:59,598 | INFO     |   CRITICAL events: 32
+2026-04-12 14:42:59,598 | INFO     |   HIGH events: 6
+2026-04-12 14:42:59,598 | INFO     |   MEDIUM events: 10
+2026-04-12 14:42:59,598 | INFO     |   LOW events: 1
+2026-04-12 14:42:59,599 | INFO     |   False positives marked: 0
+2026-04-12 14:42:59,599 | INFO     | 
+Average inference times:
+2026-04-12 14:42:59,600 | INFO     |   mirai       : 2.03ms
+2026-04-12 14:42:59,600 | INFO     |   dos         : 0.38ms
+2026-04-12 14:42:59,601 | INFO     |   replay      : 1.84ms
+2026-04-12 14:42:59,601 | INFO     |   spoof       : 0.47ms
+2026-04-12 14:42:59,601 | INFO     | 
+================================================================================
+2026-04-12 14:42:59,602 | INFO     | Edge ML system stopped cleanly
+2026-04-12 14:42:59,602 | INFO     | ================================================================================

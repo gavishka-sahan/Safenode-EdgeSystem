@@ -282,4 +282,3 @@ print("Connecting to cloud broker...")
 client.connect(BROKER_IP, BROKER_PORT, 60)
 
 client.loop_forever()
-

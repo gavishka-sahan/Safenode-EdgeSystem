@@ -1,0 +1,20 @@
+[
+  "IAT",
+  "Rate",
+  "Max",
+  "psh_flag_number",
+  "TCP",
+  "Std",
+  "Variance",
+  "UDP",
+  "AVG",
+  "Tot_size",
+  "syn_flag_number",
+  "ack_flag_number",
+  "syn_count",
+  "HTTP",
+  "rst_count",
+  "ICMP",
+  "fin_count",
+  "Min"
+]

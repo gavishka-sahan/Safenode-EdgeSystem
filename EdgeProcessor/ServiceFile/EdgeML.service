@@ -1,0 +1,29 @@
+[Unit]
+Description=IoT Network Edge Processor
+After=network.target
+#Documentation=https://github.com/
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/EdgeML
+ExecStart=/usr/bin/python3 /opt/EdgeML/EdgeML.py
+Restart=always
+RestartSec=10
+
+# Environment
+Environment="PYTHONUNBUFFERED=1"
+
+# Resource limits (Raspberry Pi 4GB)
+MemoryMax=2G
+CPUQuota=200%
+
+# Logging
+StandardOutput=append:/var/log/EdgeML/EdgeML.log
+StandardError=append:/var/log/EdgeML/EdgeML.log
+
+# Capabilities (for packet capture without full root)
+AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
+
+[Install]
+WantedBy=multi-user.target
