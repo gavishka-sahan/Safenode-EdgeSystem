@@ -22,7 +22,8 @@ def create_mqtt_client(client_id: str):
 
 class Config:
     LOG_FILE = "/opt/FlowExtractor/feature_extractor.log"
-    MQTT_BROKER = "192.168.8.135"
+    # MQTT_BROKER = "192.168.8.135"
+    MQTT_BROKER = "192.168.1.11"
     MQTT_PORT = 1883
     MQTT_TOPIC = "FlowExtractor/log"
     MQTT_CLIENT_ID = f"log_parser_{uuid.uuid4().hex[:8]}"
@@ -278,19 +279,19 @@ class MQTTLogPublisher:
         self.published_count = 0
         self.failed_count = 0
 
-    def on_connect(self, client, userdata, flags, rc):
+    def on_connect(self, client, userdata, flags, reason_code, properties):
         # MQTT connection callback
-        if rc == 0:
+        if reason_code == 0:
             self.is_connected = True
             print(f"     Connected to MQTT broker {self.broker}:{self.port}")
         else:
             self.is_connected = False
             print(f"     MQTT connection failed (rc={rc})")
 
-    def on_disconnect(self, client, userdata, rc):
+    def on_disconnect(self, client, userdata, flags, reason_code, properties):
         # MQTT disconnection callback
         self.is_connected = False
-        if rc != 0:
+        if reason_code != 0:
             print(f"Unexpected MQTT disconnection (rc={rc})")
 
     def connect(self) -> bool:
