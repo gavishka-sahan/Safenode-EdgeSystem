@@ -1,12 +1,18 @@
 import json
 import os
+import glob
 import requests
 import paho.mqtt.client as mqtt
 import uuid
 from datetime import datetime
 # from DLInferenceService import handle_dl_inference_from_json
 
-DATA_DIR = "/root/cloud_data_storage"
+# ==========================================================
+# PATHS — relative to this script's location
+# ==========================================================
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(BASE_DIR, "cloud_data_storage")
 JSON_DIR = os.path.join(DATA_DIR, "json")
 LOGS_DIR = os.path.join(DATA_DIR, "logs")
 HEALTH_DIR = os.path.join(DATA_DIR, "health")
@@ -16,6 +22,9 @@ os.makedirs(JSON_DIR, exist_ok=True)
 os.makedirs(LOGS_DIR, exist_ok=True)
 os.makedirs(HEALTH_DIR, exist_ok=True)
 os.makedirs(DETECTION_RESULTS_DIR, exist_ok=True)
+
+# Maximum number of files to keep per directory (oldest removed first)
+MAX_FILES = 10
 
 # ==========================================================
 # MQTT CLOUD BROKER CONFIG
@@ -35,7 +44,7 @@ TOPIC_EDGE_LOG = "telemetry/edge/log"
 TOPIC_EXT_LOG = "telemetry/extractor/log"
 
 TOPIC_FEATURES = "cloud/binary/features"   # carries JSON
-TOPIC_ALERTS = "cloud/binary/alerts"     # carries JSON
+TOPIC_ALERTS = "cloud/binary/alerts"       # carries JSON
 TOPIC_METADATA = "cloud/metadata"
 
 # ==========================================================
@@ -54,6 +63,23 @@ API_BASE = "http://localhost:8000/api/v1"
 pending_features = {}
 
 
+# ==========================================================
+# FILE ROTATION HELPER
+# Keeps only the MAX_FILES newest files in a directory,
+# deleting the oldest when the limit is exceeded.
+# ==========================================================
+
+def rotate_files(directory, pattern="*", max_files=MAX_FILES):
+    """Delete oldest files in directory if count exceeds max_files."""
+    files = sorted(glob.glob(os.path.join(directory, pattern)), key=os.path.getmtime)
+    while len(files) >= max_files:
+        os.remove(files.pop(0))
+
+
+# ==========================================================
+# CLASSIFICATION HELPER
+# ==========================================================
+
 def map_classification(attack_type: str, is_threat: bool) -> str:
     if not is_threat:
         return 'Normal'
@@ -68,10 +94,10 @@ def map_classification(attack_type: str, is_threat: bool) -> str:
         return 'Spoofing'
     return 'Spoofing'  # unknown threat, default to Spoofing so it shows in color
 
+
 # ==========================================================
 # MQTT CONNECT CALLBACK
 # ==========================================================
-
 
 def on_connect(client, userdata, flags, reason_code, properties):
     if reason_code == 0:
@@ -110,7 +136,9 @@ def on_message(client, userdata, msg):
             data = json.loads(payload.decode())
 
             source = "edge" if topic == TOPIC_EDGE_HEALTH else "extractor"
-            with open(os.path.join(HEALTH_DIR, f"{timestamp}_{source}_health.json"), "w") as f:
+            rotate_files(HEALTH_DIR, pattern=f"*_{source}_health.json")
+            filepath = os.path.join(HEALTH_DIR, f"{timestamp}_{source}_health.json")
+            with open(filepath, "w") as f:
                 f.write(payload.decode())
 
             if topic == TOPIC_EDGE_HEALTH:
@@ -136,12 +164,23 @@ def on_message(client, userdata, msg):
 
         # --------------------------------------------------
         # LOG FILES
+        # Single rotating log file — trimmed to last MAX_FILES lines
         # --------------------------------------------------
         elif topic == TOPIC_EDGE_LOG or topic == TOPIC_EXT_LOG:
             log_message = payload.decode()
+            log_file = os.path.join(LOGS_DIR, "system_logs.log")
 
-            with open(os.path.join(LOGS_DIR, "system_logs.log"), "a") as f:
+            # Append new line
+            with open(log_file, "a") as f:
                 f.write(log_message + "\n")
+
+            # Trim to last MAX_FILES lines
+            if os.path.exists(log_file):
+                with open(log_file, "r") as f:
+                    lines = f.readlines()
+                if len(lines) > MAX_FILES:
+                    with open(log_file, "w") as f:
+                        f.writelines(lines[-MAX_FILES:])
 
             db_payload = {
                 "log_level": "INFO",
@@ -161,8 +200,9 @@ def on_message(client, userdata, msg):
             flow_id = data.get('flow_id', 'unknown')
             features = data.get('features', {})
 
-            # Save to file
-            with open(os.path.join(JSON_DIR, f"{timestamp}_features.json"), "w") as f:
+            rotate_files(JSON_DIR, pattern="*_features.json")
+            filepath = os.path.join(JSON_DIR, f"{timestamp}_features.json")
+            with open(filepath, "w") as f:
                 json.dump(data, f, indent=2)
             print(f"Saved JSON features | flow={flow_id} src={data.get('src_ip', '?')}")
 
@@ -204,13 +244,14 @@ def on_message(client, userdata, msg):
                 "mitigation": "blocked" if is_threat else "none",
                 "edge_timestamp": data.get('edge_timestamp')
             }
-            with open(os.path.join(DETECTION_RESULTS_DIR, f"{timestamp}_detection.json"), "w") as f:
+            rotate_files(DETECTION_RESULTS_DIR, pattern="*_detection.json")
+            filepath = os.path.join(DETECTION_RESULTS_DIR, f"{timestamp}_detection.json")
+            with open(filepath, "w") as f:
                 json.dump(detection_record, f, indent=2)
             print(f"Saved detection result: src={src_ip} dst={dst_ip} threat={is_threat} attack={attack_type}")
 
             # Post detection event to API
             db_payload = {
-                # "attack_type":           attack_type,
                 "attack_type": map_classification(attack_type, is_threat),
                 "severity": "High" if is_threat else "Normal",
                 "model_name": "EdgeML",
@@ -222,8 +263,8 @@ def on_message(client, userdata, msg):
 
             # Correlate with stored features and post /traffic-features
             # with the correct classification label
-
             features = pending_features.pop(flow_id, {})
+
             # ── DL INFERENCE ────────────────────────────────
             dl_is_threat = False
             try:
@@ -233,6 +274,7 @@ def on_message(client, userdata, msg):
                         dl_is_threat = dl_result["is_threat"]
             except Exception as dl_e:
                 print(f"DL inference error: {dl_e}")
+
             traffic_db_payload = {
                 "src_ip": src_ip,
                 "dst_ip": dst_ip,
@@ -247,7 +289,6 @@ def on_message(client, userdata, msg):
                 "event_id": str(uuid.uuid4())
             }
             requests.post(f"{API_BASE}/traffic-features", json=traffic_db_payload)
-
             print(f"Inserted traffic features | classification={traffic_db_payload['classification']}")
 
         # --------------------------------------------------
@@ -255,7 +296,9 @@ def on_message(client, userdata, msg):
         # --------------------------------------------------
         elif topic == TOPIC_METADATA:
             json_data = payload.decode()
-            with open(os.path.join(JSON_DIR, f"{timestamp}_metadata.json"), "w") as f:
+            rotate_files(JSON_DIR, pattern="*_metadata.json")
+            filepath = os.path.join(JSON_DIR, f"{timestamp}_metadata.json")
+            with open(filepath, "w") as f:
                 f.write(json_data)
             print("Stored JSON metadata")
 
