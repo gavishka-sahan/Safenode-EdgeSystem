@@ -388,18 +388,24 @@ class LogParserApp:
         print("=" * 80 + "\n")
 
         last_report = time.time()
+        last_publish = time.time()
+        pending_entries = []
 
         try:
             while True:
-                # Read new log entries
+                # Read new log entries into buffer
                 new_entries = self.parser.read_new_logs()
-
                 if new_entries:
-                    # Publish to MQTT
-                    success_count = self.publisher.publish_batch(new_entries)
+                    pending_entries.extend(new_entries)
 
-                    print(f"Processed {len(new_entries)} log entries, "
-                          f"published {success_count} to {Config.MQTT_TOPIC}")
+                # Publish buffered entries every 10 seconds
+                if time.time() - last_publish >= 10:
+                    if pending_entries:
+                        success_count = self.publisher.publish_batch(pending_entries)
+                        print(f"Published {success_count}/{len(pending_entries)} log entries "
+                              f"to {Config.MQTT_TOPIC}")
+                        pending_entries = []
+                    last_publish = time.time()
 
                 # Periodic statistics report (every 60 seconds)
                 if time.time() - last_report >= 60:
