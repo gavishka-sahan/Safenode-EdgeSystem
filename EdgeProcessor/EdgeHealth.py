@@ -46,11 +46,13 @@ def on_message(client, userdata, msg):
     print(f"[{datetime.now():%H:%M:%S}] Health from Feature Extractor (#{received_count})")
 
 
-def on_connect(client, userdata, flags, rc, properties=None):
-    if rc == 0:
+def on_connect(client, userdata, flags, reason_code, properties=None):
+    if reason_code == 0:
         print(" Connected to MQTT broker")
+        # Subscribe to FlowExtractor health so on_message fires and updates feature_health.json
+        client.subscribe("FlowExtractor/SystemStat", qos=0)
     else:
-        print(f" Connection failed (rc={rc})")
+        print(f" Connection failed (rc={reason_code})")
 
 
 def generate_health(client):
@@ -80,7 +82,7 @@ def main():
 
     # MQTT setup
     try:
-        client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION1)
+        client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
     except BaseException:
         client = mqtt.Client()
 

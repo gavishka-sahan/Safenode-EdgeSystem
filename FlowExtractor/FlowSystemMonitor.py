@@ -100,7 +100,7 @@ def get_software_health(client):
     }
 
 
-def on_publish(client, userdata, mid, reason_code=None, properties=None):
+def on_publish(client, userdata, mid, reason_code, properties):
     global last_success_timestamp
     last_success_timestamp = datetime.utcnow().isoformat()
 
@@ -140,7 +140,7 @@ def main():
                 "sent_count": sent_count
             }
 
-            result = client.publish(TOPIC, json.dumps(health))
+            result = client.publish(TOPIC, json.dumps(health), qos=1)
 
             ts = datetime.now().strftime('%H:%M:%S')
             hw = health['hardware']

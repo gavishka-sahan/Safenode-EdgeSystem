@@ -57,22 +57,20 @@ def tail_log_file(filepath, topic, cloud_client):
 
 
 def monitor_health_files(cloud_client):
-    """Reads and sends the complete JSON health files every 30 seconds."""
+    """Reads and sends edge ML health file every 30 seconds.
+    Extractor health is handled via MQTT (FlowExtractor/SystemStat → on_local_message),
+    so FILE_EXT_HEALTH is excluded here — reading the stale on-disk file was
+    overwriting fresh MQTT-delivered data at the cloud every 30s.
+    """
     print("Starting health JSON monitor...")
     while True:
         if os.path.exists(FILE_EDGE_HEALTH):
             try:
                 with open(FILE_EDGE_HEALTH, 'r') as f:
+                    # QoS 0: periodic every 30s; a missed snapshot is superseded by the next
                     cloud_client.publish(TOPIC_EDGE_HEALTH, f.read(), qos=0)
             except Exception as e:
                 print(f"Could not read Edge health: {e}")
-
-        if os.path.exists(FILE_EXT_HEALTH):
-            try:
-                with open(FILE_EXT_HEALTH, 'r') as f:
-                    cloud_client.publish(TOPIC_EXT_HEALTH, f.read(), qos=0)
-            except Exception as e:
-                print(f"Could not read Extractor health: {e}")
 
         time.sleep(30)
 
