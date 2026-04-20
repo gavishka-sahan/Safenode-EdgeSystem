@@ -5,4 +5,6 @@ logs/
 *.json
 *.jsonl
 logs
+*.swp
+*.disable
 
