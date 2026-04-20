@@ -21,7 +21,7 @@ def create_mqtt_client(client_id: str):
 
 
 class Config:
-    LOG_FILE = "/var/log/FlowExtractor/FlowExtractor.log"
+    LOG_FILE = "/opt/FlowExtractor/feature_extractor.log"
     # MQTT_BROKER = "192.168.8.135"
     MQTT_BROKER = "192.168.1.11"
     MQTT_PORT = 1883
@@ -36,7 +36,7 @@ class Config:
 
 class LogPatterns:
 
-    # Base log pattern: 2026-02-11 10:30:00 | INFO | __main__ | function:123 | message
+    # Base log pattern: 2026-04-03 11:38:06,704 | INFO     | main:755 | message
     BASE = re.compile(
         r'(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:,\d+)?) \| '
         r'(?P<level>\w+)\s+\| '
