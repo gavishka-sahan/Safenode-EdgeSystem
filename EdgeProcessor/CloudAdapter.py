@@ -34,7 +34,7 @@ TOPIC_EXT_STAT_MQTT = "FlowExtractor/SystemStat"
 # --- File Paths ---
 FILE_EDGE_HEALTH = "/opt/EdgeHealth/health_storage/edge_ml_health.json"
 FILE_EXT_HEALTH = "/opt/EdgeHealth/health_storage/feature_health.json"
-FILE_EDGE_LOG = "/opt/EdgeML/logs/edge_ml.log"
+FILE_EDGE_LOG = "/home/nomad/edge_ml.log"
 FILE_EXT_LOG = "/opt/FeatureLogReceiver/feature_extractor_received.log"
 
 FEATURE_ORDER = list(CLOUD_FEATURE_INDICES.keys())

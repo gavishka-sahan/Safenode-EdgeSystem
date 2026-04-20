@@ -68,7 +68,7 @@ class Config:
 
     # Logging
     LOG_LEVEL = logging.INFO
-    LOG_FILE = Path("logs/edge_ml.log")
+    LOG_FILE = Path("/home/nomad/edge_ml.log")
 
     # Performance monitoring
     LOG_INFERENCE_TIME = True
