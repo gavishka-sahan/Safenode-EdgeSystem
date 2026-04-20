@@ -86,10 +86,26 @@ class LogPatterns:
 
 class LogParser:
 
+    STATE_FILE = "/opt/FlowLog/flowlog.state"
+
     def __init__(self, log_file: str):
         self.log_file = log_file
-        self.file_position = 0
+        self.file_position = self._load_position()
         self.log_count = 0
+
+    def _load_position(self) -> int:
+        try:
+            with open(self.STATE_FILE, 'r') as f:
+                return int(f.read().strip())
+        except (FileNotFoundError, ValueError):
+            return 0
+
+    def _save_position(self):
+        try:
+            with open(self.STATE_FILE, 'w') as f:
+                f.write(str(self.file_position))
+        except Exception as e:
+            print(f"Warning: could not save file position: {e}")
 
     def parse_log_entry(self, line: str) -> Optional[Dict]:
         # Parse base log structure
@@ -241,6 +257,7 @@ class LogParser:
 
                 # Update position
                 self.file_position = f.tell()
+                self._save_position()
 
         except FileNotFoundError:
             # Log file doesn't exist yet
