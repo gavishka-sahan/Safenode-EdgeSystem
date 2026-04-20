@@ -6,7 +6,6 @@ import json
 import logging
 import numpy as np
 from datetime import datetime
-from logging.handlers import RotatingFileHandler
 
 from scapy.all import sniff, IP, TCP, UDP, ICMP, GRE, Raw
 import paho.mqtt.client as mqtt
@@ -34,10 +33,6 @@ class Config:
     MQTT_USERNAME = None
     MQTT_PASSWORD = None
 
-    # Output
-    OUTPUT_FILE = "extracted_features.jsonl"
-    LOG_FILE = "feature_extractor.log"
-
     # Feature Extraction
     ENABLE_MQTT_PARSING = True
     ENABLE_PROTOCOL_DETECTION = True
@@ -61,18 +56,12 @@ APP_PORTS = {
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
-_file_fmt = logging.Formatter('%(asctime)s | %(levelname)-8s | %(funcName)s:%(lineno)d | %(message)s')
 _console_fmt = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-
-_fh = RotatingFileHandler(Config.LOG_FILE, maxBytes=50 * 1024 * 1024, backupCount=5)
-_fh.setLevel(logging.DEBUG)
-_fh.setFormatter(_file_fmt)
 
 _ch = logging.StreamHandler()
 _ch.setLevel(logging.INFO)
 _ch.setFormatter(_console_fmt)
 
-logger.addHandler(_fh)
 logger.addHandler(_ch)
 
 
@@ -650,34 +639,31 @@ class FlowManager:
         exported = 0
 
         try:
-            with open(Config.OUTPUT_FILE, 'a') as f:
-                for key in flow_keys:
-                    flow = self.flows.get(key)
-                    if not flow:
-                        continue
+            for key in flow_keys:
+                flow = self.flows.get(key)
+                if not flow:
+                    continue
 
-                    features = flow.calculate_features()
-                    current_pkt_count = flow.fwd_pkts + flow.bwd_pkts
+                features = flow.calculate_features()
+                current_pkt_count = flow.fwd_pkts + flow.bwd_pkts
 
-                    flow_data = {
-                        'flow_id': f"{key[0]}:{key[2]}-{key[1]}:{key[3]}/{key[4]}",
-                        'src_ip': key[0], 'dst_ip': key[1],
-                        'src_port': key[2], 'dst_port': key[3],
-                        'protocol': key[4],
-                        'timestamp': datetime.fromtimestamp(flow.start_time).isoformat(),
-                        'is_final': is_final,
-                        'export_reason': export_reason,
-                        'features': features
-                    }
+                flow_data = {
+                    'flow_id': f"{key[0]}:{key[2]}-{key[1]}:{key[3]}/{key[4]}",
+                    'src_ip': key[0], 'dst_ip': key[1],
+                    'src_port': key[2], 'dst_port': key[3],
+                    'protocol': key[4],
+                    'timestamp': datetime.fromtimestamp(flow.start_time).isoformat(),
+                    'is_final': is_final,
+                    'export_reason': export_reason,
+                    'features': features
+                }
 
-                    f.write(json.dumps(flow_data) + '\n')
+                if self.mqtt.is_connected:
+                    self.mqtt.publish_flow(flow_data)
 
-                    if self.mqtt.is_connected:
-                        self.mqtt.publish_flow(flow_data)
-
-                    flow.exported_once = True
-                    flow.packet_count_at_last_export = current_pkt_count
-                    exported += 1
+                flow.exported_once = True
+                flow.packet_count_at_last_export = current_pkt_count
+                exported += 1
 
             logger.debug(f"_export_specific_flows: {exported} flows, reason={export_reason}, is_final={is_final}")
 
