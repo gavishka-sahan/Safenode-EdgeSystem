@@ -2,3 +2,7 @@ __pycache__/
 *.env
 logs/
 *.log
+*.json
+*.jsonl
+logs
+
