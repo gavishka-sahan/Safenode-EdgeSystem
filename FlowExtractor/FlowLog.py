@@ -21,7 +21,8 @@ def create_mqtt_client(client_id: str):
 
 
 class Config:
-    LOG_FILE = "/opt/FlowExtractor/feature_extractor.log"
+    # LOG_FILE = "/opt/FlowExtractor/feature_extractor.log"
+    LOG_FILE = "/home/nomad/Safenode-EdgeSystem/FlowExtractor/feature_extractor.log"
     # MQTT_BROKER = "192.168.8.135"
     MQTT_BROKER = "192.168.1.11"
     MQTT_PORT = 1883
