@@ -86,7 +86,7 @@ class LogPatterns:
 
 class LogParser:
 
-    STATE_FILE = "/opt/FlowLog/flowlog.state"
+    STATE_FILE = str(__import__('pathlib').Path(__file__).parent / "flowlog.state")
 
     def __init__(self, log_file: str):
         self.log_file = log_file
