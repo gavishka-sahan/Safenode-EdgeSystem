@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 
 import sys
+import os
 import time
 import json
 import logging
+import logging.handlers
 import numpy as np
 from datetime import datetime
 
@@ -63,6 +65,19 @@ _ch.setLevel(logging.INFO)
 _ch.setFormatter(_console_fmt)
 
 logger.addHandler(_ch)
+
+_LOG_PATH = "/home/nomad/flowextractor.log"
+os.makedirs(os.path.dirname(_LOG_PATH), exist_ok=True)
+
+_fh = logging.handlers.RotatingFileHandler(
+    _LOG_PATH,
+    maxBytes=5 * 1024 * 1024,   # 5 MB per file
+    backupCount=5               # keep .log + 5 rotated = 30 MB max
+)
+_fh.setLevel(logging.DEBUG)
+_fh.setFormatter(_console_fmt)
+
+logger.addHandler(_fh)
 
 
 # MQTT
