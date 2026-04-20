@@ -43,6 +43,11 @@ class Config:
     # frame_time_delta_bin threshold (seconds)
     FRAME_TIME_DELTA_BIN_THRESHOLD = 0.1
 
+    # Log shipping to EdgeProcessor
+    MQTT_TOPIC_LOG = "FlowExtractor/log"
+    LOG_SHIP_INTERVAL = 10          # seconds between log publishes
+    LOG_SHIP_QOS = 0                # fire-and-forget for log lines
+
 
 # Protocol & Port Constants
 PROTOCOL_TCP, PROTOCOL_UDP, PROTOCOL_ICMP, PROTOCOL_GRE = 6, 17, 1, 47
@@ -78,6 +83,95 @@ _fh.setLevel(logging.DEBUG)
 _fh.setFormatter(_console_fmt)
 
 logger.addHandler(_fh)
+
+
+class LogShipper:
+    """
+    Reads only NEW lines from the log file every LOG_SHIP_INTERVAL seconds
+    and publishes them to FlowExtractor/log on the local MQTT broker (QoS 0).
+    Tracks the file byte offset so already-sent lines are never re-sent,
+    even across log rotations (detects rotation by inode change).
+    """
+
+    def __init__(self, mqtt_client_ref):
+        self._mqtt = mqtt_client_ref   # reference to MQTTPublisher set after it's created
+        self._offset = 0
+        self._inode = None
+        self._thread = None
+        self._stop = False
+
+    def set_mqtt(self, mqtt_publisher):
+        """Called once the MQTTPublisher instance is ready."""
+        self._mqtt = mqtt_publisher
+
+    def _read_new_lines(self):
+        """Return list of new log lines since last read, handling rotation."""
+        try:
+            stat = os.stat(_LOG_PATH)
+            current_inode = stat.st_ino
+
+            # Detect log rotation (RotatingFileHandler renamed the file)
+            if self._inode is not None and current_inode != self._inode:
+                self._offset = 0
+
+            self._inode = current_inode
+
+            with open(_LOG_PATH, 'r') as f:
+                f.seek(self._offset)
+                lines = f.readlines()
+                self._offset = f.tell()
+
+            return [line.rstrip('\n') for line in lines if line.strip()]
+        except FileNotFoundError:
+            return []
+        except Exception as e:
+            logger.debug(f"LogShipper read error: {e}")
+            return []
+
+    def _ship(self):
+        """Background loop: every LOG_SHIP_INTERVAL, read new lines and publish."""
+        while not self._stop:
+            time.sleep(Config.LOG_SHIP_INTERVAL)
+            if self._stop:
+                break
+
+            lines = self._read_new_lines()
+            if not lines or not self._mqtt or not self._mqtt.is_connected:
+                continue
+
+            payload = json.dumps({
+                'timestamp': datetime.utcnow().isoformat() + 'Z',
+                'source': 'FlowExtractor',
+                'lines': lines
+            })
+
+            try:
+                self._mqtt.client.publish(
+                    Config.MQTT_TOPIC_LOG,
+                    payload,
+                    qos=Config.LOG_SHIP_QOS   # QoS 0 — fire and forget
+                )
+            except Exception as e:
+                logger.debug(f"LogShipper publish error: {e}")
+
+    def start(self):
+        self._stop = False
+        # Initialise offset to current end-of-file so we only ship future lines
+        try:
+            self._offset = os.path.getsize(_LOG_PATH)
+            self._inode = os.stat(_LOG_PATH).st_ino
+        except FileNotFoundError:
+            self._offset = 0
+            self._inode = None
+
+        self._thread = __import__('threading').Thread(
+            target=self._ship, name="LogShipper", daemon=True
+        )
+        self._thread.start()
+        logger.info(f"LogShipper started — publishing to {Config.MQTT_TOPIC_LOG} every {Config.LOG_SHIP_INTERVAL}s (QoS {Config.LOG_SHIP_QOS})")
+
+    def stop(self):
+        self._stop = True
 
 
 # MQTT
@@ -740,10 +834,14 @@ def main():
 
     fm = FlowManager()
 
+    log_shipper = LogShipper(None)
+
     if Config.MQTT_ENABLED:
         logger.info("Connecting to MQTT broker...")
         if fm.mqtt.connect():
             logger.info("MQTT ready")
+            log_shipper.set_mqtt(fm.mqtt)
+            log_shipper.start()
         else:
             logger.warning("MQTT connection failed, continuing without MQTT")
 
@@ -760,6 +858,7 @@ def main():
         logger.info("SHUTTING DOWN")
         logger.info("=" * 70)
 
+        log_shipper.stop()
         fm.export_flows()
 
         if Config.MQTT_ENABLED:
@@ -779,6 +878,7 @@ def main():
 
     except Exception as e:
         logger.error(f"Fatal error: {e}", exc_info=True)
+        log_shipper.stop()
         if Config.MQTT_ENABLED:
             fm.mqtt.disconnect()
         raise
