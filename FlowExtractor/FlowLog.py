@@ -286,13 +286,13 @@ class MQTTLogPublisher:
             print(f"     Connected to MQTT broker {self.broker}:{self.port}")
         else:
             self.is_connected = False
-            print(f"     MQTT connection failed (rc={rc})")
+            print(f"     MQTT connection failed (rc={reason_code})")
 
     def on_disconnect(self, client, userdata, flags, reason_code, properties):
         # MQTT disconnection callback
         self.is_connected = False
         if reason_code != 0:
-            print(f"Unexpected MQTT disconnection (rc={rc})")
+            print(f"Unexpected MQTT disconnection (rc={reason_code})")
 
     def connect(self) -> bool:
         # Connect to MQTT broker
