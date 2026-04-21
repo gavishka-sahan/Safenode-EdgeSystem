@@ -19,8 +19,16 @@ EDGE_LOG_FILE = os.path.join(DATA_DIR, "edge_log.jsonl")
 EXTRACTOR_LOG_FILE = os.path.join(DATA_DIR, "extractor_log.jsonl")
 METADATA_FILE = os.path.join(DATA_DIR, "metadata.jsonl")
 
+# API enforces string_too_long at 1000 chars on the message field.
+# Extractor bundles batch many log lines into one payload, which
+# regularly exceeds this. Truncate silently rather than re-queue
+# forever (a structural validation failure will never succeed on retry).
+MESSAGE_MAX_LEN = 1000
+
 
 def insert_log(log_source, message):
+    if len(message) > MESSAGE_MAX_LEN:
+        message = message[:MESSAGE_MAX_LEN]
     payload = {
         "log_level":  "INFO",
         "log_source": log_source,

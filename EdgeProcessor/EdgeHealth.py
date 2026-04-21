@@ -68,7 +68,9 @@ def generate_health(client):
     }
 
     STORE_PATH.mkdir(exist_ok=True)
-    (STORE_PATH / "edge_ml_health.json").write_text(json.dumps(health, indent=2))
+    # Compact JSON (no indent) so CloudAdapter publishes a single-line payload
+    # that fits cleanly into the cloud's JSONL-per-topic storage format.
+    (STORE_PATH / "edge_ml_health.json").write_text(json.dumps(health))
 
 
 def main():

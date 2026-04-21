@@ -93,31 +93,33 @@ def on_message(client, userdata, msg):
         # FEATURES
         # --------------------------------------------------
         if topic == TOPIC_FEATURES:
-            # Validate JSON before writing so malformed payloads
-            # don't poison the file
-            json.loads(payload)
-            append_line(FEATURES_FILE, payload)
+            # Parse and re-serialize as compact JSON so pretty-printed
+            # payloads (multi-line) collapse to a single JSONL line.
+            # Also validates the payload — malformed JSON raises here
+            # and gets caught below without poisoning the file.
+            compact = json.dumps(json.loads(payload))
+            append_line(FEATURES_FILE, compact)
 
         # --------------------------------------------------
         # DETECTIONS (ALERTS)
         # --------------------------------------------------
         elif topic == TOPIC_ALERTS:
-            json.loads(payload)
-            append_line(DETECTIONS_FILE, payload)
+            compact = json.dumps(json.loads(payload))
+            append_line(DETECTIONS_FILE, compact)
 
         # --------------------------------------------------
         # EDGE HEALTH
         # --------------------------------------------------
         elif topic == TOPIC_EDGE_HEALTH:
-            json.loads(payload)
-            append_line(EDGE_HEALTH_FILE, payload)
+            compact = json.dumps(json.loads(payload))
+            append_line(EDGE_HEALTH_FILE, compact)
 
         # --------------------------------------------------
         # EXTRACTOR HEALTH
         # --------------------------------------------------
         elif topic == TOPIC_EXT_HEALTH:
-            json.loads(payload)
-            append_line(EXTRACTOR_HEALTH_FILE, payload)
+            compact = json.dumps(json.loads(payload))
+            append_line(EXTRACTOR_HEALTH_FILE, compact)
 
         # --------------------------------------------------
         # EDGE LOG (wrap plain text line into JSON for uniform parsing)
@@ -135,9 +137,15 @@ def on_message(client, userdata, msg):
 
         # --------------------------------------------------
         # RAW METADATA PASSTHROUGH (no DB target; cleared on schedule)
+        # Also compacted so it stays one line per record.
         # --------------------------------------------------
         elif topic == TOPIC_METADATA:
-            append_line(METADATA_FILE, payload)
+            try:
+                compact = json.dumps(json.loads(payload))
+                append_line(METADATA_FILE, compact)
+            except json.JSONDecodeError:
+                # Metadata passthrough may be non-JSON; write as-is (escaped newlines)
+                append_line(METADATA_FILE, payload.replace("\n", "\\n"))
 
     except json.JSONDecodeError as e:
         print(f"Dropped malformed JSON on {msg.topic}: {e}")
