@@ -36,6 +36,45 @@ def check_cloud() -> dict:
         return {"reachable": False, "latency_ms": None}
 
 
+def get_cpu_temperature():
+    # Read CPU temperature (Raspberry Pi specific)
+    try:
+        with open("/sys/class/thermal/thermal_zone0/temp") as f:
+            return round(int(f.read()) / 1000, 1)
+    except (FileNotFoundError, ValueError):
+        return None
+
+
+def get_hardware_health() -> dict:
+    # Collect hardware metrics in the same schema as FlowSystemMonitor
+    # so the cloud's decoder can handle both edge and extractor identically.
+    mem = psutil.virtual_memory()
+    disk = psutil.disk_usage('/')
+    net = psutil.net_io_counters()
+
+    return {
+        "cpu_usage_percent": psutil.cpu_percent(interval=1),
+        "cpu_temperature_c": get_cpu_temperature(),
+        "memory": {
+            "used_mb": round(mem.used / (1024 * 1024), 1),
+            "available_mb": round(mem.available / (1024 * 1024), 1),
+            "percent": mem.percent
+        },
+        "disk_usage_percent": disk.percent,
+        "network": {
+            "bytes_sent": net.bytes_sent,
+            "bytes_recv": net.bytes_recv,
+            "packets_sent": net.packets_sent,
+            "packets_recv": net.packets_recv,
+            "errin": net.errin,
+            "errout": net.errout,
+            "dropin": net.dropin,
+            "dropout": net.dropout
+        },
+        "uptime_seconds": int(time.time() - psutil.boot_time())
+    }
+
+
 def on_message(client, userdata, msg):
     global received_count, last_message_time
     received_count += 1
@@ -61,9 +100,12 @@ def generate_health(client):
     health = {
         "module": "edge_ml",
         "timestamp": datetime.now(timezone.utc).isoformat(),
+        "hardware": get_hardware_health(),
         "mqtt": {"connected": client.is_connected(), "messages_received": received_count},
         "cloud": check_cloud(),
         "models": check_models(),
+        # Kept for backward compatibility with older cloud decoders;
+        # new decoder reads from hardware.network instead.
         "bandwidth_bytes": net.bytes_sent + net.bytes_recv
     }
 

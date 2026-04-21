@@ -19,6 +19,22 @@ EXTRACTOR_HEALTH_FILE = os.path.join(DATA_DIR, "extractor_health.jsonl")
 
 
 def decode_edge_health(data):
+    # Prefer the full hardware block (new format matches extractor schema).
+    # Fall back to the legacy flat bandwidth_bytes field so records produced
+    # by an older EdgeHealth.py still decode, just with zeros for the
+    # metrics it didn't collect.
+    hw = data.get("hardware")
+    if hw:
+        net = hw.get("network", {})
+        return {
+            "cpu_usage_percent":    min(hw.get("cpu_usage_percent", 0), 100),
+            "memory_usage_percent": hw.get("memory", {}).get("percent", 0),
+            "disk_usage_percent":   hw.get("disk_usage_percent", 0),
+            "network_rx_bytes":     net.get("bytes_recv", 0),
+            "network_tx_bytes":     net.get("bytes_sent", 0),
+            "cpu_temperature":      hw.get("cpu_temperature_c", 0) or 0,
+        }
+    # Legacy payload — only bandwidth total was published
     return {
         "cpu_usage_percent":    0,
         "memory_usage_percent": 0,
