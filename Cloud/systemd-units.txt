@@ -1,0 +1,128 @@
+# ==========================================================
+# SYSTEMD UNITS FOR BATCH DB LOADERS
+# Place each block in its own file under /etc/systemd/system/
+# Adjust REPO_ROOT below if your install path differs.
+#
+# REPO_ROOT = /root/safenode/Safenode-EdgeSystem
+#
+# After installing all 6 files:
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now safenode-health-loader.timer
+#   sudo systemctl enable --now safenode-json-loader.timer
+#   sudo systemctl enable --now safenode-log-loader.timer
+#
+# Check status:
+#   systemctl list-timers | grep safenode
+#   journalctl -u safenode-json-loader.service -f
+# ==========================================================
+
+
+# ----------------------------------------------------------
+# /etc/systemd/system/safenode-health-loader.service
+# ----------------------------------------------------------
+[Unit]
+Description=Safenode health file -> database loader
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root/safenode/Safenode-EdgeSystem/Cloud
+ExecStart=/usr/bin/python3 /root/safenode/Safenode-EdgeSystem/Cloud/health_to_db.py
+User=root
+# Light resource caps — this is a short batch job
+Nice=10
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target
+
+
+# ----------------------------------------------------------
+# /etc/systemd/system/safenode-health-loader.timer
+# ----------------------------------------------------------
+[Unit]
+Description=Run Safenode health loader every 60s
+
+[Timer]
+# Start 30s after boot, then every 60s
+OnBootSec=30s
+OnUnitActiveSec=60s
+# Ensure the timer fires even if a run was missed (e.g. system asleep)
+Persistent=true
+Unit=safenode-health-loader.service
+
+[Install]
+WantedBy=timers.target
+
+
+# ----------------------------------------------------------
+# /etc/systemd/system/safenode-json-loader.service
+# ----------------------------------------------------------
+[Unit]
+Description=Safenode features+detection JSON -> database loader
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root/safenode/Safenode-EdgeSystem/Cloud
+ExecStart=/usr/bin/python3 /root/safenode/Safenode-EdgeSystem/Cloud/json_to_db.py
+User=root
+Nice=10
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target
+
+
+# ----------------------------------------------------------
+# /etc/systemd/system/safenode-json-loader.timer
+# ----------------------------------------------------------
+[Unit]
+Description=Run Safenode JSON loader every 60s
+
+[Timer]
+OnBootSec=45s
+OnUnitActiveSec=60s
+Persistent=true
+Unit=safenode-json-loader.service
+
+[Install]
+WantedBy=timers.target
+
+
+# ----------------------------------------------------------
+# /etc/systemd/system/safenode-log-loader.service
+# ----------------------------------------------------------
+[Unit]
+Description=Safenode system log file -> database loader
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root/safenode/Safenode-EdgeSystem/Cloud
+ExecStart=/usr/bin/python3 /root/safenode/Safenode-EdgeSystem/Cloud/log_to_db.py
+User=root
+Nice=10
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target
+
+
+# ----------------------------------------------------------
+# /etc/systemd/system/safenode-log-loader.timer
+# ----------------------------------------------------------
+[Unit]
+Description=Run Safenode log loader every 60s
+
+[Timer]
+OnBootSec=60s
+OnUnitActiveSec=60s
+Persistent=true
+Unit=safenode-log-loader.service
+
+[Install]
+WantedBy=timers.target

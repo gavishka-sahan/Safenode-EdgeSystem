@@ -1,10 +1,11 @@
 import os
 import json
 import requests
-from datetime import datetime, timezone
 
 API_BASE = "http://localhost:8000/api/v1"
-HEALTH_DIR = "/root/safenode/Safenode-EdgeSystem/Cloud/cloud_data_storage/health"
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+HEALTH_DIR = os.path.join(BASE_DIR, "cloud_data_storage", "health")
 
 
 def decode_edge_health(data):
@@ -19,7 +20,7 @@ def decode_edge_health(data):
 
 
 def decode_extractor_health(data):
-    hw  = data.get("hardware", {})
+    hw = data.get("hardware", {})
     net = hw.get("network", data.get("network", {}))
     return {
         "cpu_usage_percent":    min(hw.get("cpu_usage_percent", 0), 100),
@@ -44,13 +45,15 @@ def insert_health(payload):
 
 
 def main():
-    all_files   = sorted(os.listdir(HEALTH_DIR))
-    health_files = [f for f in all_files if f.endswith(".json")]
+    if not os.path.isdir(HEALTH_DIR):
+        print(f"Health directory not found: {HEALTH_DIR}")
+        return
 
+    health_files = sorted(f for f in os.listdir(HEALTH_DIR) if f.endswith(".json"))
     print(f"Found {len(health_files)} health files\n")
 
     inserted = 0
-    skipped  = 0
+    skipped = 0
 
     for filename in health_files:
         path = os.path.join(HEALTH_DIR, filename)
@@ -69,15 +72,19 @@ def main():
         elif module == "feature_extractor":
             payload = decode_extractor_health(data)
         else:
-            print(f"  ⚠ Unknown module '{module}' in {filename}, skipping")
+            print(f"  ⚠ Unknown module '{module}' in {filename}, skipping (file kept)")
             skipped += 1
             continue
 
-        ok = insert_health(payload)
-        if ok:
+        if insert_health(payload):
             print(f"  ✓ {module} | cpu={payload['cpu_usage_percent']}% | mem={payload['memory_usage_percent']}% | rx={payload['network_rx_bytes']}")
+            try:
+                os.remove(path)
+            except OSError as e:
+                print(f"    ⚠ Could not delete {filename}: {e}")
             inserted += 1
         else:
+            # Leave file on disk — will retry on next run
             skipped += 1
 
     print(f"\nDone. Inserted: {inserted} | Skipped: {skipped}")
