@@ -1,10 +1,23 @@
+"""
+Batch loader: reads edge_log.jsonl and extractor_log.jsonl, posts each
+line to the system-logs API. Also wipes metadata.jsonl on each run
+since it has no DB target and exists only for debugging.
+"""
+
 import os
+import json
 import requests
+
+from jsonl_utils import snapshot_file, read_lines, requeue_lines, remove_snapshot
 
 API_BASE = "http://localhost:8000/api/v1"
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-LOG_FILE = os.path.join(BASE_DIR, "cloud_data_storage", "logs", "system_logs.log")
+DATA_DIR = os.path.join(BASE_DIR, "cloud_data_storage")
+
+EDGE_LOG_FILE = os.path.join(DATA_DIR, "edge_log.jsonl")
+EXTRACTOR_LOG_FILE = os.path.join(DATA_DIR, "extractor_log.jsonl")
+METADATA_FILE = os.path.join(DATA_DIR, "metadata.jsonl")
 
 
 def insert_log(log_source, message):
@@ -24,62 +37,69 @@ def insert_log(log_source, message):
         return False
 
 
-def main():
-    if not os.path.isfile(LOG_FILE):
-        print(f"Log file not found: {LOG_FILE}")
-        return
+def process_log_file(live_path, log_source, label):
+    snapshot_path = snapshot_file(live_path)
+    if snapshot_path is None:
+        return 0, 0
 
-    # Read-and-truncate under a lock-free swap:
-    # rename to .processing so new writes from CloudSubscriber go to a fresh file,
-    # then ingest from the snapshot. If any line fails, we re-append the remaining
-    # lines back onto the live file so they retry on the next run.
-    processing_path = LOG_FILE + ".processing"
-    try:
-        os.rename(LOG_FILE, processing_path)
-    except FileNotFoundError:
-        # Nothing to process
-        return
-    except OSError as e:
-        print(f"Could not rotate log for processing: {e}")
-        return
-
-    with open(processing_path) as f:
-        lines = f.readlines()
-
+    lines = read_lines(snapshot_path)
     if not lines:
-        os.remove(processing_path)
-        print("Log file empty")
-        return
+        remove_snapshot(snapshot_path)
+        return 0, 0
 
-    print(f"Found {len(lines)} log lines\n")
+    print(f"[{label}] {len(lines)} line(s) to process")
 
     inserted = 0
     failed_lines = []
 
     for raw in lines:
-        line = raw.rstrip("\n")
-        if not line.strip():
-            continue
-
-        # CloudSubscriber writes each line as "<topic>\t<message>"
-        if "\t" in line:
-            log_source, message = line.split("\t", 1)
-        else:
-            log_source, message = "unknown", line
+        try:
+            data = json.loads(raw)
+            message = data.get("message", "")
+        except json.JSONDecodeError:
+            # Non-JSON line — treat whole line as the message for robustness
+            message = raw.strip()
 
         if insert_log(log_source, message):
             inserted += 1
         else:
             failed_lines.append(raw)
 
-    if failed_lines:
-        # Re-queue failed lines at the front of the live log file
-        with open(LOG_FILE, "a") as f:
-            f.writelines(failed_lines)
-        print(f"\n{len(failed_lines)} line(s) re-queued for next run")
+    requeue_lines(live_path, failed_lines)
+    remove_snapshot(snapshot_path)
 
-    os.remove(processing_path)
-    print(f"\nDone. Inserted: {inserted} | Failed: {len(failed_lines)}")
+    return inserted, len(failed_lines)
+
+
+def wipe_metadata():
+    """Clear the raw metadata passthrough file. No DB target, debug-only."""
+    if os.path.exists(METADATA_FILE):
+        try:
+            os.remove(METADATA_FILE)
+            print("[metadata] Cleared metadata.jsonl")
+        except OSError as e:
+            print(f"[metadata] Could not clear: {e}")
+
+
+def main():
+    if not os.path.isdir(DATA_DIR):
+        print(f"Data directory not found: {DATA_DIR}")
+        return
+
+    total_inserted = 0
+    total_failed = 0
+
+    ins, fail = process_log_file(EDGE_LOG_FILE, "telemetry/edge/log", "edge_log")
+    total_inserted += ins
+    total_failed += fail
+
+    ins, fail = process_log_file(EXTRACTOR_LOG_FILE, "telemetry/extractor/log", "extractor_log")
+    total_inserted += ins
+    total_failed += fail
+
+    wipe_metadata()
+
+    print(f"\nDone. Inserted: {total_inserted} | Failed (re-queued): {total_failed}")
 
 
 if __name__ == "__main__":

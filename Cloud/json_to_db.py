@@ -1,21 +1,37 @@
+"""
+Batch loader: pairs features.jsonl and detections.jsonl by flow_id,
+posts each matched pair as (detection_event, traffic_feature),
+re-queues unmatched features (may pair with a detection next run),
+quarantines true orphans older than the grace period.
+
+Cross-file atomicity:
+    Both files are snapshotted in immediate succession so any feature
+    whose detection arrives between the two renames is preserved —
+    the unmatched feature is re-queued to the live features.jsonl
+    and will pair up on the next run.
+"""
+
 import os
 import json
 import uuid
-import time
 import requests
 from datetime import datetime
+
+from jsonl_utils import snapshot_file, read_lines, requeue_lines, remove_snapshot
 
 API_BASE = "http://localhost:8000/api/v1"
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-JSON_DIR = os.path.join(BASE_DIR, "cloud_data_storage", "json")
-DETECTION_DIR = os.path.join(BASE_DIR, "cloud_data_storage", "detection_results")
-ORPHAN_DIR = os.path.join(JSON_DIR, "orphaned")
+DATA_DIR = os.path.join(BASE_DIR, "cloud_data_storage")
 
-# How long to wait for the matching detection file before declaring orphan.
-# Feature + detection files are published back-to-back by CloudAdapter;
-# 30s is a generous safety window for MQTT/network/disk-write jitter.
-GRACE_PERIOD_SECONDS = 30
+FEATURES_FILE = os.path.join(DATA_DIR, "features.jsonl")
+DETECTIONS_FILE = os.path.join(DATA_DIR, "detections.jsonl")
+ORPHAN_FILE = os.path.join(DATA_DIR, "orphaned_features.jsonl")
+
+# Max number of consecutive runs a feature may stay in the queue without
+# finding its matching detection before being declared orphan.
+# With a 60s timer, ORPHAN_THRESHOLD_RUNS=2 means ~2 minutes of grace.
+ORPHAN_THRESHOLD_RUNS = 2
 
 # Map model names and attack_type strings to clean dashboard labels
 MODEL_TO_ATTACK = {
@@ -71,55 +87,18 @@ def resolve_attack_type(detection_data):
     return "Normal"
 
 
-def load_detections_by_flow():
-    """Load all detection JSONs indexed by flow_id. Returns {flow_id: (filepath, data)}."""
-    if not os.path.isdir(DETECTION_DIR):
-        return {}
-
-    detections = {}
-    for filename in os.listdir(DETECTION_DIR):
-        if not filename.endswith("_detection.json"):
-            continue
-        filepath = os.path.join(DETECTION_DIR, filename)
-        try:
-            with open(filepath) as f:
-                data = json.load(f)
-            flow_id = data.get("flow_id")
-            if flow_id:
-                # If two detections share a flow_id (rare — same tuple reused), keep newest
-                if flow_id in detections:
-                    existing_path, _ = detections[flow_id]
-                    if os.path.getmtime(filepath) > os.path.getmtime(existing_path):
-                        detections[flow_id] = (filepath, data)
-                else:
-                    detections[flow_id] = (filepath, data)
-        except Exception as e:
-            print(f"  ✗ Skipping detection {filename}: {e}")
-    return detections
-
-
-def parse_feature_file(filepath):
-    """Parse a features JSON file into a normalized record."""
-    with open(filepath) as f:
-        data = json.load(f)
-    feat = data.get("features", {})
-    return {
-        "src_ip":      data.get("src_ip", "0.0.0.0"),
-        "dst_ip":      data.get("dst_ip", "0.0.0.0"),
-        "flow_id":     data.get("flow_id", "unknown"),
-        "timestamp":   data.get("timestamp", datetime.utcnow().isoformat()),
-        "ttl":         feat.get("ttl_value", 0.0),
-        "byte_count":  int(feat.get("byte_count", 0)),
-        "packet_size": float(feat.get("avg_packet_size", 0.0)),
-    }
-
-
-def insert_pair(event_id, feature_record, detection_data):
-    """Insert both detection event and traffic feature. Returns True only if BOTH succeed."""
+def insert_pair(feature_data, detection_data):
+    """
+    Insert both detection event and traffic feature.
+    Returns (success: bool, attack_label: str | None).
+    """
     attack_label = resolve_attack_type(detection_data)
     is_threat = detection_data.get("is_threat", False)
     inference_time = float(detection_data.get("inference_time_ms", 0.0))
     mitigation = detection_data.get("mitigation", "blocked" if is_threat else "none")
+
+    features = feature_data.get("features", {})
+    event_id = str(uuid.uuid4())
 
     detection_payload = {
         "event_id":              event_id,
@@ -131,13 +110,13 @@ def insert_pair(event_id, feature_record, detection_data):
     }
     traffic_payload = {
         "event_id":       event_id,
-        "timestamp":      feature_record["timestamp"],
-        "src_ip":         feature_record["src_ip"],
-        "dst_ip":         feature_record["dst_ip"],
-        "protocol":       get_protocol(feature_record["flow_id"]),
-        "byte_count":     feature_record["byte_count"],
-        "packet_size":    feature_record["packet_size"],
-        "ttl":            feature_record["ttl"],
+        "timestamp":      feature_data.get("timestamp", datetime.utcnow().isoformat()),
+        "src_ip":         feature_data.get("src_ip", "0.0.0.0"),
+        "dst_ip":         feature_data.get("dst_ip", "0.0.0.0"),
+        "protocol":       get_protocol(feature_data.get("flow_id", "unknown")),
+        "byte_count":     int(features.get("byte_count", 0)),
+        "packet_size":    float(features.get("avg_packet_size", 0.0)),
+        "ttl":            float(features.get("ttl_value", 0.0)),
         "classification": attack_label,
         "ml":             True,
         "dl":             False,
@@ -156,73 +135,120 @@ def insert_pair(event_id, feature_record, detection_data):
     return ok, attack_label
 
 
+def parse_records(raw_lines):
+    """Parse JSONL lines into (record, raw_line) tuples. Drops malformed."""
+    out = []
+    for raw in raw_lines:
+        try:
+            data = json.loads(raw)
+            out.append((data, raw))
+        except json.JSONDecodeError as e:
+            print(f"  ✗ Malformed JSON dropped: {e}")
+    return out
+
+
 def main():
-    if not os.path.isdir(JSON_DIR):
-        print(f"JSON directory not found: {JSON_DIR}")
+    if not os.path.isdir(DATA_DIR):
+        print(f"Data directory not found: {DATA_DIR}")
         return
 
-    os.makedirs(ORPHAN_DIR, exist_ok=True)
+    # Snapshot both files in rapid succession.
+    # Any detection that arrives between these two renames will be
+    # handled on the next run (feature re-queued, detection stays in live file).
+    features_snap = snapshot_file(FEATURES_FILE)
+    detections_snap = snapshot_file(DETECTIONS_FILE)
 
-    feature_files = sorted(
-        f for f in os.listdir(JSON_DIR)
-        if f.endswith("_features.json")
-    )
-    detections = load_detections_by_flow()
+    feature_lines = read_lines(features_snap)
+    detection_lines = read_lines(detections_snap)
 
-    print(f"Found {len(feature_files)} feature files | {len(detections)} detection records\n")
+    print(f"Found {len(feature_lines)} features | {len(detection_lines)} detections")
 
-    inserted, waiting, orphaned, failed = 0, 0, 0, 0
+    if not feature_lines and not detection_lines:
+        remove_snapshot(features_snap)
+        remove_snapshot(detections_snap)
+        print("Nothing to process")
+        return
+
+    # Index detections by flow_id so features can look them up in O(1).
+    # If duplicates exist for the same flow_id, keep the last one seen.
+    detection_records = parse_records(detection_lines)
+    detections_by_flow = {}
+    for data, raw in detection_records:
+        flow_id = data.get("flow_id")
+        if flow_id:
+            detections_by_flow[flow_id] = (data, raw)
+
+    feature_records = parse_records(feature_lines)
+
+    inserted = 0
+    failed_pairs = []     # (feature_raw, detection_raw) — API error, retry both
+    unmatched_features = []  # feature_raw — no detection yet, retry feature
     counts = {}
-    now = time.time()
 
-    for filename in feature_files:
-        feature_path = os.path.join(JSON_DIR, filename)
+    for feature_data, feature_raw in feature_records:
+        flow_id = feature_data.get("flow_id", "unknown")
+        detection_pair = detections_by_flow.get(flow_id)
 
-        try:
-            record = parse_feature_file(feature_path)
-        except Exception as e:
-            print(f"  ✗ Error parsing {filename}: {e}")
-            failed += 1
+        if detection_pair is None:
+            # Check retry count embedded in the feature record itself
+            retry_count = int(feature_data.get("_retry_count", 0))
+
+            if retry_count >= ORPHAN_THRESHOLD_RUNS:
+                # True orphan — write to quarantine file
+                with open(ORPHAN_FILE, "a") as f:
+                    f.write(feature_raw if feature_raw.endswith("\n") else feature_raw + "\n")
+                print(f"  ⚠ ORPHAN quarantined (retry={retry_count}): flow={flow_id}")
+            else:
+                # Bump retry counter and re-queue
+                feature_data["_retry_count"] = retry_count + 1
+                unmatched_features.append(json.dumps(feature_data) + "\n")
             continue
 
-        flow_id = record["flow_id"]
-        pair = detections.get(flow_id)
+        detection_data, detection_raw = detection_pair
 
-        if pair is None:
-            # No matching detection — check file age
-            age = now - os.path.getmtime(feature_path)
-            if age < GRACE_PERIOD_SECONDS:
-                # Still within grace period — leave for next run
-                waiting += 1
-                continue
-            else:
-                # True orphan — quarantine so the queue can drain
-                print(f"  ⚠ ORPHAN (no detection after {int(age)}s): {filename} | flow={flow_id}")
-                try:
-                    os.rename(feature_path, os.path.join(ORPHAN_DIR, filename))
-                except OSError as e:
-                    print(f"    ✗ Could not quarantine: {e}")
-                orphaned += 1
-                continue
-
-        detection_path, detection_data = pair
-
-        ok, label = insert_pair(str(uuid.uuid4()), record, detection_data)
+        ok, label = insert_pair(feature_data, detection_data)
         if ok:
             counts[label] = counts.get(label, 0) + 1
-            print(f"  ✓ {label} | {record['src_ip']} → {record['dst_ip']} | flow={flow_id}")
-            # Delete BOTH files only after successful dual-insert
-            for p in (feature_path, detection_path):
-                try:
-                    os.remove(p)
-                except OSError as e:
-                    print(f"    ⚠ Could not delete {p}: {e}")
+            print(f"  ✓ {label} | {feature_data.get('src_ip', '?')} → {feature_data.get('dst_ip', '?')} | flow={flow_id}")
             inserted += 1
         else:
-            # Leave both files on disk — will retry next run
-            failed += 1
+            # API failure — re-queue both for retry
+            failed_pairs.append((feature_raw, detection_raw))
 
-    print(f"\nDone. Inserted: {inserted} | Waiting: {waiting} | Orphaned: {orphaned} | Failed: {failed}")
+    # Re-queue failed pairs (both files)
+    if failed_pairs:
+        with open(FEATURES_FILE, "a") as f:
+            for feat_raw, _ in failed_pairs:
+                f.write(feat_raw if feat_raw.endswith("\n") else feat_raw + "\n")
+        with open(DETECTIONS_FILE, "a") as f:
+            for _, det_raw in failed_pairs:
+                f.write(det_raw if det_raw.endswith("\n") else det_raw + "\n")
+
+    # Re-queue unmatched features (waiting for detections to arrive next run)
+    requeue_lines(FEATURES_FILE, unmatched_features)
+
+    # Re-queue detections whose feature was unmatched this run (waiting
+    # for the feature to be retried next run). Failed pairs already have
+    # their detection re-queued via the failed_pairs block above.
+    flows_needing_detection = set()
+    for line in unmatched_features:
+        try:
+            fid = json.loads(line).get("flow_id")
+            if fid:
+                flows_needing_detection.add(fid)
+        except json.JSONDecodeError:
+            pass
+
+    unmatched_detections = [
+        raw for data, raw in detection_records
+        if data.get("flow_id") in flows_needing_detection
+    ]
+    requeue_lines(DETECTIONS_FILE, unmatched_detections)
+
+    remove_snapshot(features_snap)
+    remove_snapshot(detections_snap)
+
+    print(f"\nDone. Inserted: {inserted} | Waiting: {len(unmatched_features)} | Failed (re-queued): {len(failed_pairs)}")
     if counts:
         print(f"Distribution: {counts}")
 

@@ -1,11 +1,21 @@
+"""
+Batch loader: reads edge_health.jsonl and extractor_health.jsonl,
+posts each record to the health logs API, re-queues failures.
+"""
+
 import os
 import json
 import requests
 
+from jsonl_utils import snapshot_file, read_lines, requeue_lines, remove_snapshot
+
 API_BASE = "http://localhost:8000/api/v1"
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-HEALTH_DIR = os.path.join(BASE_DIR, "cloud_data_storage", "health")
+DATA_DIR = os.path.join(BASE_DIR, "cloud_data_storage")
+
+EDGE_HEALTH_FILE = os.path.join(DATA_DIR, "edge_health.jsonl")
+EXTRACTOR_HEALTH_FILE = os.path.join(DATA_DIR, "extractor_health.jsonl")
 
 
 def decode_edge_health(data):
@@ -44,50 +54,61 @@ def insert_health(payload):
         return False
 
 
-def main():
-    if not os.path.isdir(HEALTH_DIR):
-        print(f"Health directory not found: {HEALTH_DIR}")
-        return
+def process_file(live_path, decoder, label):
+    snapshot_path = snapshot_file(live_path)
+    if snapshot_path is None:
+        return 0, 0
 
-    health_files = sorted(f for f in os.listdir(HEALTH_DIR) if f.endswith(".json"))
-    print(f"Found {len(health_files)} health files\n")
+    lines = read_lines(snapshot_path)
+    if not lines:
+        remove_snapshot(snapshot_path)
+        return 0, 0
+
+    print(f"[{label}] {len(lines)} record(s) to process")
 
     inserted = 0
-    skipped = 0
+    failed_lines = []
 
-    for filename in health_files:
-        path = os.path.join(HEALTH_DIR, filename)
+    for raw in lines:
         try:
-            with open(path) as f:
-                data = json.load(f)
-        except Exception as e:
-            print(f"  ✗ Failed to parse {filename}: {e}")
-            skipped += 1
+            data = json.loads(raw)
+        except json.JSONDecodeError as e:
+            print(f"  ✗ Malformed JSON dropped: {e}")
+            # Corrupted line — don't re-queue, just skip it
             continue
 
-        module = data.get("module", "")
-
-        if module == "edge_ml":
-            payload = decode_edge_health(data)
-        elif module == "feature_extractor":
-            payload = decode_extractor_health(data)
-        else:
-            print(f"  ⚠ Unknown module '{module}' in {filename}, skipping (file kept)")
-            skipped += 1
-            continue
+        payload = decoder(data)
 
         if insert_health(payload):
-            print(f"  ✓ {module} | cpu={payload['cpu_usage_percent']}% | mem={payload['memory_usage_percent']}% | rx={payload['network_rx_bytes']}")
-            try:
-                os.remove(path)
-            except OSError as e:
-                print(f"    ⚠ Could not delete {filename}: {e}")
             inserted += 1
+            print(f"  ✓ cpu={payload['cpu_usage_percent']}% mem={payload['memory_usage_percent']}% rx={payload['network_rx_bytes']}")
         else:
-            # Leave file on disk — will retry on next run
-            skipped += 1
+            failed_lines.append(raw)
 
-    print(f"\nDone. Inserted: {inserted} | Skipped: {skipped}")
+    # Re-queue failed lines to the live file for the next run
+    requeue_lines(live_path, failed_lines)
+    remove_snapshot(snapshot_path)
+
+    return inserted, len(failed_lines)
+
+
+def main():
+    if not os.path.isdir(DATA_DIR):
+        print(f"Data directory not found: {DATA_DIR}")
+        return
+
+    total_inserted = 0
+    total_failed = 0
+
+    ins, fail = process_file(EDGE_HEALTH_FILE, decode_edge_health, "edge")
+    total_inserted += ins
+    total_failed += fail
+
+    ins, fail = process_file(EXTRACTOR_HEALTH_FILE, decode_extractor_health, "extractor")
+    total_inserted += ins
+    total_failed += fail
+
+    print(f"\nDone. Inserted: {total_inserted} | Failed (re-queued): {total_failed}")
 
 
 if __name__ == "__main__":

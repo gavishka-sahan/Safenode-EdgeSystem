@@ -9,15 +9,16 @@ from datetime import datetime
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "cloud_data_storage")
-JSON_DIR = os.path.join(DATA_DIR, "json")
-LOGS_DIR = os.path.join(DATA_DIR, "logs")
-HEALTH_DIR = os.path.join(DATA_DIR, "health")
-DETECTION_RESULTS_DIR = os.path.join(DATA_DIR, "detection_results")
+os.makedirs(DATA_DIR, exist_ok=True)
 
-os.makedirs(JSON_DIR, exist_ok=True)
-os.makedirs(LOGS_DIR, exist_ok=True)
-os.makedirs(HEALTH_DIR, exist_ok=True)
-os.makedirs(DETECTION_RESULTS_DIR, exist_ok=True)
+# Per-topic append-only JSONL files
+FEATURES_FILE = os.path.join(DATA_DIR, "features.jsonl")
+DETECTIONS_FILE = os.path.join(DATA_DIR, "detections.jsonl")
+EDGE_HEALTH_FILE = os.path.join(DATA_DIR, "edge_health.jsonl")
+EXTRACTOR_HEALTH_FILE = os.path.join(DATA_DIR, "extractor_health.jsonl")
+EDGE_LOG_FILE = os.path.join(DATA_DIR, "edge_log.jsonl")
+EXTRACTOR_LOG_FILE = os.path.join(DATA_DIR, "extractor_log.jsonl")
+METADATA_FILE = os.path.join(DATA_DIR, "metadata.jsonl")
 
 # ==========================================================
 # MQTT CLOUD BROKER CONFIG
@@ -39,6 +40,18 @@ TOPIC_EXT_LOG = "telemetry/extractor/log"
 TOPIC_FEATURES = "cloud/binary/features"
 TOPIC_ALERTS = "cloud/binary/alerts"
 TOPIC_METADATA = "cloud/metadata"
+
+
+# ==========================================================
+# APPEND HELPER
+# Opens, writes one line, closes — allows rename-based
+# rotation to work safely from the batch loader.
+# ==========================================================
+
+def append_line(filepath, line):
+    """Append a single line (without trailing newline) to a file."""
+    with open(filepath, "a") as f:
+        f.write(line + "\n")
 
 
 # ==========================================================
@@ -66,70 +79,70 @@ def on_connect(client, userdata, flags, reason_code, properties):
 
 # ==========================================================
 # MQTT MESSAGE HANDLER
-# Files only — batch loaders handle DB inserts and cleanup
+# Appends one JSONL line per message; batch loaders consume
+# these files via atomic rename-and-process rotation.
 # ==========================================================
 
 def on_message(client, userdata, msg):
-    print("Incoming topic:", msg.topic)
     try:
         topic = msg.topic
-        payload = msg.payload
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")
+        payload = msg.payload.decode()
+        received_at = datetime.utcnow().isoformat()
 
         # --------------------------------------------------
-        # HEALTH (edge + extractor)
+        # FEATURES
         # --------------------------------------------------
-        if topic == TOPIC_EDGE_HEALTH or topic == TOPIC_EXT_HEALTH:
-            source = "edge" if topic == TOPIC_EDGE_HEALTH else "extractor"
-            filepath = os.path.join(HEALTH_DIR, f"{timestamp}_{source}_health.json")
-            with open(filepath, "w") as f:
-                f.write(payload.decode())
-            print(f"Saved {source} health to {filepath}")
+        if topic == TOPIC_FEATURES:
+            # Validate JSON before writing so malformed payloads
+            # don't poison the file
+            json.loads(payload)
+            append_line(FEATURES_FILE, payload)
 
         # --------------------------------------------------
-        # LOG LINES (appended to single rolling log file)
-        # log_to_db.py truncates this file after successful ingest
-        # --------------------------------------------------
-        elif topic == TOPIC_EDGE_LOG or topic == TOPIC_EXT_LOG:
-            log_message = payload.decode()
-            log_file = os.path.join(LOGS_DIR, "system_logs.log")
-            # Tag each line with its source topic so the batch loader can set log_source
-            with open(log_file, "a") as f:
-                f.write(f"{topic}\t{log_message}\n")
-
-        # --------------------------------------------------
-        # JSON FEATURES (per-flow, paired with alert by flow_id)
-        # --------------------------------------------------
-        elif topic == TOPIC_FEATURES:
-            data = json.loads(payload.decode())
-            flow_id = data.get('flow_id', 'unknown')
-            filepath = os.path.join(JSON_DIR, f"{timestamp}_features.json")
-            with open(filepath, "w") as f:
-                json.dump(data, f, indent=2)
-            print(f"Saved features | flow={flow_id} src={data.get('src_ip', '?')}")
-
-        # --------------------------------------------------
-        # JSON ALERTS (per-flow detection result)
+        # DETECTIONS (ALERTS)
         # --------------------------------------------------
         elif topic == TOPIC_ALERTS:
-            data = json.loads(payload.decode())
-            flow_id = data.get('flow_id', 'unknown')
-            filepath = os.path.join(DETECTION_RESULTS_DIR, f"{timestamp}_detection.json")
-            with open(filepath, "w") as f:
-                json.dump(data, f, indent=2)
-            print(f"Saved detection | flow={flow_id} threat={data.get('is_threat', False)}")
+            json.loads(payload)
+            append_line(DETECTIONS_FILE, payload)
 
         # --------------------------------------------------
-        # RAW METADATA PASSTHROUGH (file-only, no DB target)
+        # EDGE HEALTH
+        # --------------------------------------------------
+        elif topic == TOPIC_EDGE_HEALTH:
+            json.loads(payload)
+            append_line(EDGE_HEALTH_FILE, payload)
+
+        # --------------------------------------------------
+        # EXTRACTOR HEALTH
+        # --------------------------------------------------
+        elif topic == TOPIC_EXT_HEALTH:
+            json.loads(payload)
+            append_line(EXTRACTOR_HEALTH_FILE, payload)
+
+        # --------------------------------------------------
+        # EDGE LOG (wrap plain text line into JSON for uniform parsing)
+        # --------------------------------------------------
+        elif topic == TOPIC_EDGE_LOG:
+            wrapped = json.dumps({"received_at": received_at, "message": payload})
+            append_line(EDGE_LOG_FILE, wrapped)
+
+        # --------------------------------------------------
+        # EXTRACTOR LOG
+        # --------------------------------------------------
+        elif topic == TOPIC_EXT_LOG:
+            wrapped = json.dumps({"received_at": received_at, "message": payload})
+            append_line(EXTRACTOR_LOG_FILE, wrapped)
+
+        # --------------------------------------------------
+        # RAW METADATA PASSTHROUGH (no DB target; cleared on schedule)
         # --------------------------------------------------
         elif topic == TOPIC_METADATA:
-            filepath = os.path.join(JSON_DIR, f"{timestamp}_metadata.json")
-            with open(filepath, "w") as f:
-                f.write(payload.decode())
-            print("Stored raw metadata")
+            append_line(METADATA_FILE, payload)
 
+    except json.JSONDecodeError as e:
+        print(f"Dropped malformed JSON on {msg.topic}: {e}")
     except Exception as e:
-        print("Error processing message:", e)
+        print(f"Error processing message on {msg.topic}: {e}")
 
 
 # ==========================================================
