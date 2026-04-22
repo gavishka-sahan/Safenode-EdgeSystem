@@ -4,15 +4,23 @@ Threat Severity Manager
 Tracks detections per device and classifies severity based on count within time window
 
 Severity Levels:
-- CRITICAL (≥5 flows/60s): Auto-Isolate
+- CRITICAL (>=5 flows/60s): Auto-Isolate
 - HIGH (3-4 flows/60s): Isolate + Alert
 - MEDIUM (2 flows/60s): Alert Only
 - LOW (1 flow/60s): Log Only
+
+Dedup policy:
+  A single flow can be exported multiple times by FlowExtractor (first, new_packets,
+  completed). Without dedup, one benign flow false-positiving on N exports would
+  inflate severity and trigger isolation. We dedup by (flow_id, model_name) inside
+  the active window: repeated detections for the same flow+model refresh the
+  existing entry rather than stacking. Different models on the same flow count
+  separately, because they represent independent detection signals.
 """
 
 import time
 import logging
-from typing import Dict, List
+from typing import Dict, List, Optional
 from dataclasses import dataclass
 from enum import Enum
 from collections import defaultdict
@@ -28,9 +36,17 @@ class SeverityConfig:
     MEDIUM_THRESHOLD = 2
     MIN_CONFIDENCE = 0.70
 
-    # Model-specific (Mirai has higher accuracy, lower thresholds)
+    # Model-specific thresholds.
+    #
+    # Previously mirai used {'critical': 3, 'high': 2, 'medium': 1}, justified by
+    # a claimed 99.99% training accuracy. On real deployment traffic the mirai
+    # model exhibits a ~75% FP rate, so those tight thresholds caused instant
+    # escalation and isolation on benign traffic.
+    #
+    # Aligned to the other models until real-world FP rate has been measured
+    # post-retrain and re-calibrated.
     MODEL_THRESHOLDS = {
-        'mirai': {'critical': 3, 'high': 2, 'medium': 1},
+        'mirai': {'critical': 5, 'high': 3, 'medium': 2},
         'dos': {'critical': 5, 'high': 3, 'medium': 2},
         'replay': {'critical': 5, 'high': 3, 'medium': 2},
         'spoof': {'critical': 5, 'high': 3, 'medium': 2},
@@ -61,6 +77,7 @@ class Detection:
     threat_type: str
     confidence: float
     model_name: str
+    flow_id: str = ""  # used for dedup: same (flow_id, model_name) updates in place
 
 
 @dataclass
@@ -95,14 +112,25 @@ class ThreatSeverityManager:
         self.detection_history: Dict[str, List[Detection]] = defaultdict(list)
         self.isolated_devices: Dict[str, float] = {}
         self.stats = {
-            'total_detections': 0, 'critical_count': 0, 'high_count': 0,
+            'total_detections': 0,
+            'deduped_detections': 0,  # repeat detections merged into existing entry
+            'critical_count': 0, 'high_count': 0,
             'medium_count': 0, 'low_count': 0, 'false_positive_overrides': 0
         }
 
     def record_detection(self, device_mac: str, threat_type: str,
                          confidence: float, model_name: str,
+                         flow_id: str = "",
                          features_summary: dict = None) -> SeverityDecision:
-        """Record detection and return severity decision"""
+        """
+        Record detection and return severity decision.
+
+        Dedup rule: if a Detection with the same (flow_id, model_name) already
+        exists inside the active window for this device, update it in place
+        (refresh timestamp, keep max confidence) instead of appending. This
+        prevents repeated exports of the same flow from inflating the count.
+        Detections with an empty flow_id are never deduped (treated as unique).
+        """
         now = time.time()
 
         # Check confidence threshold
@@ -115,17 +143,30 @@ class ThreatSeverityManager:
                 reason=f"Confidence {confidence:.2f} < {self.config.MIN_CONFIDENCE}"
             )
 
-        # Add detection
-        self.detection_history[device_mac].append(
-            Detection(now, threat_type, confidence, model_name)
-        )
-        self.stats['total_detections'] += 1
-
-        # Cleanup old detections
+        # Prune old detections first, so dedup search only considers active window
         cutoff = now - self.config.WINDOW_SECONDS
         self.detection_history[device_mac] = [
             d for d in self.detection_history[device_mac] if d.timestamp > cutoff
         ]
+
+        # Dedup: look for an existing entry with same flow_id + model_name
+        existing = self._find_existing_detection(device_mac, flow_id, model_name)
+        if existing is not None:
+            # Refresh in place — do NOT increment total_detections
+            existing.timestamp = now
+            existing.confidence = max(existing.confidence, confidence)
+            self.stats['deduped_detections'] += 1
+        else:
+            self.detection_history[device_mac].append(
+                Detection(
+                    timestamp=now,
+                    threat_type=threat_type,
+                    confidence=confidence,
+                    model_name=model_name,
+                    flow_id=flow_id,
+                )
+            )
+            self.stats['total_detections'] += 1
 
         recent = self.detection_history[device_mac]
         count = len(recent)
@@ -149,6 +190,19 @@ class ThreatSeverityManager:
             threat_types=types, average_confidence=avg_conf,
             reason=reason, is_critical_device=is_critical
         )
+
+    def _find_existing_detection(self, device_mac: str, flow_id: str,
+                                 model_name: str) -> Optional[Detection]:
+        """
+        Find an existing detection for (flow_id, model_name) in the active window.
+        Returns None if flow_id is empty (no dedup key) or if not found.
+        """
+        if not flow_id:
+            return None
+        for d in self.detection_history[device_mac]:
+            if d.flow_id == flow_id and d.model_name == model_name:
+                return d
+        return None
 
     def _classify(self, mac: str, count: int, model: str,
                   conf: float, is_critical: bool) -> tuple:

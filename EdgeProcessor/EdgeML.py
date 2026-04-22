@@ -66,6 +66,17 @@ class Config:
     CLOUD_FORWARD_ENABLED = True
     BATCH_SIZE = 1
 
+    # Early-export filtering.
+    # FlowExtractor publishes each flow multiple times (first, new_packets,
+    # completed). The very first export often fires on only 2-5 packets, which
+    # is statistically unreliable: IAT std, avg packet size, and flag ratios
+    # haven't stabilized. Training was done on mature flow statistics, so these
+    # early exports are a significant FP source. We skip inference on "first"
+    # exports that have fewer than MIN_PACKETS_FOR_FIRST_EXPORT packets and
+    # let the next export (with more packets) be the one that's scored.
+    # Completed and new_packets exports are always scored regardless of count.
+    MIN_PACKETS_FOR_FIRST_EXPORT = 10
+
     # Logging
     LOG_LEVEL = logging.INFO
     LOG_FILE = Path("/home/nomad/edge_ml.log")
@@ -104,6 +115,8 @@ class MLModelManager:
         self.feature_names: Dict[str, List[str]] = {}
         self.model_info: Dict[str, Dict] = {}
         self.inference_times: Dict[str, List[float]] = defaultdict(list)
+        # Missing-feature tracking for visibility into FP causes
+        self.missing_feature_events: Dict[str, int] = defaultdict(int)
 
     def load_models(self):
         logger.info("=" * 80)
@@ -208,10 +221,42 @@ class MLModelManager:
         logger.info("=" * 80)
 
     def select_features(self, all_features: Dict[int, float], model_name: str) -> np.ndarray:
+        """
+        Build the feature vector for a given model.
 
+        Previously this silently substituted 0.0 for any missing feature. That
+        hid real feature-extraction bugs and, because models (e.g. mirai) can
+        predict high-confidence attack on all-zero input, turned one missing
+        feature into a false positive at runtime.
+
+        Now: missing features are still substituted with 0.0 to keep inference
+        running (better than a crash in a detection loop), but every occurrence
+        is logged as a warning and counted, so they are visible and actionable.
+        """
         indices = self.feature_indices[model_name]
-        # selected = [all_features.get(i, 0.0) for i in indices]
-        selected = [all_features.get(i, all_features.get(str(i), 0.0)) for i in indices]
+        selected = []
+        missing = []
+
+        for i in indices:
+            # Accept either int or str keys, matching the JSON-over-MQTT path
+            val = all_features.get(i)
+            if val is None:
+                val = all_features.get(str(i))
+            if val is None:
+                missing.append(i)
+                val = 0.0
+            selected.append(val)
+
+        if missing:
+            self.missing_feature_events[model_name] += 1
+            # Log once per occurrence with the specific indices so a pattern
+            # (always the same feature missing) is easy to spot in logs.
+            missing_names = [f"{i}({get_feature_name(i)})" for i in missing]
+            logger.warning(
+                f"{model_name}: {len(missing)} feature(s) missing, substituted 0.0 "
+                f"(possible FP risk). Missing: {missing_names}"
+            )
+
         return np.array([selected], dtype=np.float32)
 
     def get_model_threshold(self, model_name: str) -> float:
@@ -276,9 +321,29 @@ class MLModelManager:
                 predicted_class = 1 if is_threat else 0
 
             elif len(output.shape) == 2 and output.shape[1] > 2:
-                predicted_class = int(np.argmax(output[0]))
-                confidence = float(np.max(output[0]))
-                is_threat = (predicted_class != 0)
+                # Multi-class (>2) output — previously used raw argmax and
+                # ignored get_model_threshold(), which meant any attack class
+                # winning the argmax became a threat even at low confidence
+                # (e.g. P(benign)=0.45, P(greip)=0.28 still flagged as threat).
+                #
+                # Fix: gate on benign probability. Flag as threat only if
+                # P(benign) < (1 - threshold). With mirai threshold=0.3, this
+                # means "only flag if P(benign) < 0.7" — benign-leaning but
+                # ambiguous predictions now stay benign.
+                probs = output[0]
+                benign_prob = float(probs[0])
+                threshold = self.get_model_threshold(model_name)
+                benign_cutoff = 1.0 - threshold
+
+                is_threat = benign_prob < benign_cutoff
+                if is_threat:
+                    # Pick the most likely attack class among classes 1..N
+                    attack_idx = int(np.argmax(probs[1:])) + 1
+                    predicted_class = attack_idx
+                    confidence = float(probs[attack_idx])
+                else:
+                    predicted_class = 0
+                    confidence = benign_prob
 
             else:
                 logger.warning(f"Unexpected output shape from {model_name}: {output.shape}")
@@ -462,9 +527,14 @@ class MQTTHandler:
         # Initialize Severity Manager
         self.severity_manager = ThreatSeverityManager()
 
-        # Statistics
+        # Statistics. flows_inferenced distinguishes flows actually scored
+        # by the models from raw MQTT messages received — needed because the
+        # early-export filter may skip some flows. Real FP rate is
+        # threats_detected / flows_inferenced, not / messages_received.
         self.stats = {
             'messages_received': 0,
+            'flows_inferenced': 0,
+            'flows_skipped_early_export': 0,
             'threats_detected': 0,
             'isolations_triggered': 0
         }
@@ -514,11 +584,26 @@ class MQTTHandler:
         else:
             indexed_features = convert_named_to_indexed(flow_data)
 
+        # Early-export filter: skip inference when this is the first export of
+        # a flow that hasn't accumulated enough packets to have stable features.
+        # Completed and subsequent (new_packets) exports are always scored, as
+        # are flows whose packet_count is already above the minimum. Skipped
+        # flows are still forwarded to the cloud so the dashboard sees all
+        # traffic; only inference is bypassed.
+        export_reason = flow_data.get('export_reason', 'unknown')
+        # feature 27 == packet_count (total fwd+bwd)
+        packet_count = indexed_features.get(27, indexed_features.get('27', 0)) or 0
+        skip_inference = (
+            export_reason == 'first'
+            and packet_count < Config.MIN_PACKETS_FOR_FIRST_EXPORT
+        )
+
         # Get device identifier for severity tracking.
-        # FlowExtractor does not send MAC addresses — use src_ip as the
-        # per-device key instead. This ensures the severity manager tracks
-        # each source IP independently rather than lumping all flows into
-        # the 'unknown' bucket.
+        # FlowExtractor does not currently send MAC addresses — fall back to
+        # src_ip. This groups all flows from one host under one key, which is
+        # acceptable now that severity dedups by (flow_id, model_name) and
+        # thresholds have been relaxed. Revisit when FlowExtractor is updated
+        # to emit MACs (see outstanding bugs list).
         device_mac = (
             flow_data.get('src_mac')                          # real MAC if ever added
             or flow_data.get('device_info', {}).get('src_mac')
@@ -537,12 +622,30 @@ class MQTTHandler:
             'timestamp': flow_data.get('timestamp', time.time())
         }
 
-        # Run ML detection
-        result = self.detector.detect_threats(metadata)
+        # Run ML detection unless the early-export filter skipped this flow
+        if skip_inference:
+            self.stats['flows_skipped_early_export'] += 1
+            result = {
+                'feature_id': metadata['feature_id'],
+                'event_id': None,
+                'device_id': metadata['device_id'],
+                'timestamp': metadata['timestamp'],
+                'is_threat': False,
+                'threats_detected': [],
+                'model_results': {},
+                'total_inference_time_ms': 0.0,
+                'system_status': 'skipped_early_export',
+                'skip_reason': f"first export with {packet_count} packets "
+                               f"(< {Config.MIN_PACKETS_FOR_FIRST_EXPORT})"
+            }
+        else:
+            self.stats['flows_inferenced'] += 1
+            result = self.detector.detect_threats(metadata)
 
         # If threat detected, use severity manager
         if result['is_threat']:
             self.stats['threats_detected'] += 1
+            self._emit_threat_trace(flow_data, metadata, result, indexed_features)
             self._handle_threat_with_severity(result, metadata, client)
 
         # Forward to cloud (all flows, not just threats)
@@ -570,20 +673,60 @@ class MQTTHandler:
                 qos=0
             )
 
+    def _emit_threat_trace(self, flow_data: dict, metadata: dict,
+                           result: dict, indexed_features: dict):
+        """
+        Emit a single-line JSON trace of every threat detection, with enough
+        context to reconstruct what happened during FP forensics.
+        Grep-friendly prefix 'THREAT_TRACE' makes it easy to extract from logs.
+        """
+        try:
+            trace = {
+                'ts': time.time(),
+                'flow_id': flow_data.get('flow_id'),
+                'export_reason': flow_data.get('export_reason'),
+                'src_ip': flow_data.get('src_ip'),
+                'dst_ip': flow_data.get('dst_ip'),
+                'src_port': flow_data.get('src_port'),
+                'dst_port': flow_data.get('dst_port'),
+                'protocol': flow_data.get('protocol'),
+                # feature 27 = packet_count, 0 = flow_duration, 1 = rate
+                'packet_count': indexed_features.get(27, indexed_features.get('27', 0)),
+                'flow_duration': indexed_features.get(0, indexed_features.get('0', 0)),
+                'rate': indexed_features.get(1, indexed_features.get('1', 0)),
+                'models_fired': [t['model'] for t in result.get('threats_detected', [])],
+                'confidences': {
+                    t['model']: round(t['confidence'], 4)
+                    for t in result.get('threats_detected', [])
+                },
+                'attack_types': {
+                    t['model']: t['attack_type']
+                    for t in result.get('threats_detected', [])
+                },
+            }
+            logger.info(f"THREAT_TRACE | {json.dumps(trace)}")
+        except Exception as e:
+            # Never let trace logging break detection flow
+            logger.debug(f"THREAT_TRACE emit failed: {e}")
+
     def _handle_threat_with_severity(self, result: Dict, metadata: Dict, client):
         device_mac = metadata.get('device_mac', 'unknown')
+        flow_id = metadata.get('flow_id', '')
 
         for threat in result.get('threats_detected', []):
             model_name = threat['model']
             confidence = threat['confidence']
             attack_type = threat['attack_type']
 
-            # Record detection in severity manager
+            # Record detection in severity manager. flow_id is passed so the
+            # manager can dedup repeated exports of the same flow by the same
+            # model. Different models firing on the same flow count separately.
             decision = self.severity_manager.record_detection(
                 device_mac=device_mac,
                 threat_type=model_name,
                 confidence=confidence,
                 model_name=model_name,
+                flow_id=flow_id,
                 features_summary={
                     'attack_type': attack_type,
                     'device_id': metadata.get('device_id'),
@@ -663,7 +806,8 @@ class MQTTHandler:
         """Get handler statistics"""
         return {
             **self.stats,
-            'severity_stats': self.severity_manager.get_stats()
+            'severity_stats': self.severity_manager.get_stats(),
+            'missing_feature_events': dict(self.detector.models.missing_feature_events),
         }
 
 
@@ -671,13 +815,14 @@ def main():
     """Main entry point"""
 
     logger.info("=" * 80)
-    logger.info("EDGE ML MODULE - SEVERITY-BASED THREAT DETECTION v4.0")
+    logger.info("EDGE ML MODULE - SEVERITY-BASED THREAT DETECTION v4.1")
     logger.info("=" * 80)
     logger.info(f"Start Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     logger.info(f"Python: {sys.version}")
     logger.info(f"ONNX Runtime: {ort.__version__}")
     logger.info(f"Edge features: {TOTAL_FEATURES}")
     logger.info(f"Cloud features: {TOTAL_CLOUD_FEATURES}")
+    logger.info(f"Min packets for first export inference: {Config.MIN_PACKETS_FOR_FIRST_EXPORT}")
     logger.info("")
 
     Config.MODEL_DIR.mkdir(parents=True, exist_ok=True)
@@ -729,9 +874,18 @@ def main():
         logger.info("=" * 80)
 
         logger.info("\nMessage Processing:")
-        logger.info(f"  Messages received: {handler_stats['messages_received']}")
-        logger.info(f"  Threats detected: {handler_stats['threats_detected']}")
-        logger.info(f"  Isolations triggered: {handler_stats['isolations_triggered']}")
+        logger.info(f"  Messages received:         {handler_stats['messages_received']}")
+        logger.info(f"  Flows inferenced:          {handler_stats['flows_inferenced']}")
+        logger.info(f"  Flows skipped (early):     {handler_stats['flows_skipped_early_export']}")
+        logger.info(f"  Threats detected:          {handler_stats['threats_detected']}")
+        logger.info(f"  Isolations triggered:      {handler_stats['isolations_triggered']}")
+
+        # Derived FP-diagnostic ratio: only meaningful against flows actually scored
+        if handler_stats['flows_inferenced']:
+            threat_rate = (
+                handler_stats['threats_detected'] / handler_stats['flows_inferenced'] * 100
+            )
+            logger.info(f"  Threat rate (of inferenced): {threat_rate:.2f}%")
 
         logger.info("\nML Detection Stats:")
         logger.info(f"  Total flows processed: {detector_stats['total_detections']}")
@@ -740,9 +894,18 @@ def main():
             for model, count in sorted(detector_stats['threats_by_model'].items()):
                 logger.info(f"    {model:12s}: {count} threats")
 
+        # Missing-feature visibility — non-zero values indicate a FlowExtractor
+        # feature-population bug that could be inflating FP counts.
+        mfe = handler_stats.get('missing_feature_events') or {}
+        if mfe:
+            logger.info("\nMissing-feature events (per model):")
+            for model, count in sorted(mfe.items()):
+                logger.info(f"  {model:12s}: {count} inference(s) with missing features")
+
         logger.info("\nSeverity Stats:")
         severity_stats = handler_stats['severity_stats']
         logger.info(f"  Total detections recorded: {severity_stats['total_detections']}")
+        logger.info(f"  Deduped detections:        {severity_stats.get('deduped_detections', 0)}")
         logger.info(f"  CRITICAL events: {severity_stats['critical_count']}")
         logger.info(f"  HIGH events: {severity_stats['high_count']}")
         logger.info(f"  MEDIUM events: {severity_stats['medium_count']}")
