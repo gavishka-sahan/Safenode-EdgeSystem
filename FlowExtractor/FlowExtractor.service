@@ -1,0 +1,25 @@
+[Unit]
+Description=Safenode Flow Extractor - Packet Capture & Feature Extraction
+After=network-online.target mosquitto.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/nomad/Safenode-EdgeSystem/FlowExtractor
+ExecStart=/usr/bin/python3 /home/nomad/Safenode-EdgeSystem/FlowExtractor/FlowExtractor.py
+Restart=always
+RestartSec=10
+
+Environment="PYTHONUNBUFFERED=1"
+
+MemoryMax=2G
+CPUQuota=200%
+
+StandardOutput=append:/var/log/FlowExtractor/FlowExtractor.log
+StandardError=append:/var/log/FlowExtractor/FlowExtractor.log
+
+AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
+
+[Install]
+WantedBy=multi-user.target

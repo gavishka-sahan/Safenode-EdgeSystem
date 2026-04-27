@@ -1,0 +1,23 @@
+[Unit]
+Description=Safenode Flow System Monitor - Hardware & Software Health Reporting
+After=network-online.target mosquitto.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/nomad/Safenode-EdgeSystem/FlowExtractor
+ExecStart=/usr/bin/python3 /home/nomad/Safenode-EdgeSystem/FlowExtractor/FlowSystemMonitor.py
+Restart=always
+RestartSec=10
+
+Environment="PYTHONUNBUFFERED=1"
+
+MemoryMax=512M
+CPUQuota=50%
+
+StandardOutput=append:/var/log/FlowExtractor/FlowSystemMonitor.log
+StandardError=append:/var/log/FlowExtractor/FlowSystemMonitor.log
+
+[Install]
+WantedBy=multi-user.target
