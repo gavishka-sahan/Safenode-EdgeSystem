@@ -1,0 +1,15 @@
+[Unit]
+Description=Safenode Batch Loader - Detection & Feature Records to DB
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/home/nomad/Safenode-EdgeSystem/Cloud
+ExecStart=/usr/bin/python3 /home/nomad/Safenode-EdgeSystem/Cloud/json_to_db.py
+
+Environment="PYTHONUNBUFFERED=1"
+
+StandardOutput=append:/var/log/CloudServices/json_to_db.log
+StandardError=append:/var/log/CloudServices/json_to_db.log

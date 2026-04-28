@@ -1,0 +1,10 @@
+[Unit]
+Description=Safenode Timer - Health Batch Loader (every 10s)
+
+[Timer]
+OnBootSec=30
+OnUnitActiveSec=10s
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target
