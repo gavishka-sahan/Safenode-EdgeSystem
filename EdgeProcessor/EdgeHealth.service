@@ -1,0 +1,23 @@
+[Unit]
+Description=Safenode Edge Health Monitor - Hardware & Software Health Reporting
+After=network-online.target mosquitto.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/nomad/Safenode-EdgeSystem/EdgeProcessor
+ExecStart=/usr/bin/python3 /home/nomad/Safenode-EdgeSystem/EdgeProcessor/EdgeHealth.py
+Restart=always
+RestartSec=10
+
+Environment="PYTHONUNBUFFERED=1"
+
+MemoryMax=512M
+CPUQuota=50%
+
+StandardOutput=append:/var/log/EdgeProcessor/EdgeHealth.log
+StandardError=append:/var/log/EdgeProcessor/EdgeHealth.log
+
+[Install]
+WantedBy=multi-user.target
