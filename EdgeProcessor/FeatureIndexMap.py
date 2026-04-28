@@ -191,8 +191,8 @@ def get_model_info(model_name: str) -> Dict:
 
             'model_file': 'mirai_model.onnx',
             'requires_scaler': False,
-            'accuracy': 0.9999,
-            'inference_time_ms': 1.71,
+            'accuracy': 0.83,
+           # 'inference_time_ms': -,
             'dataset': 'CICIoT2023',
             'classes': {
                 0: 'BenignTraffic',
@@ -205,28 +205,37 @@ def get_model_info(model_name: str) -> Dict:
             'full_name': 'Replay Attack Detection',
             'attack_types': ['Replay Attack', 'MQTT Replay'],
             'feature_count': 13,
-
             'model_file': 'replay_model.onnx',
             'requires_scaler': True,
-            'dataset': 'Teammate dataset',
+            'dataset': 'CICIOT2023',
+            'classes': {
+                0: 'BenignTraffic',
+                1: 'Replay'
+            },
         },
         'dos': {
             'full_name': 'DoS Attack Detection',
-            'attack_types': ['DDoS', 'SYN Flood', 'UDP Flood'],
+            'attack_types': ['SYN Flood', 'UDP Flood'],
             'feature_count': 18,
-
             'model_file': 'dos_model.onnx',
             'requires_scaler': True,
-            'dataset': 'Teammate dataset',
+            'dataset': 'CICIOT2023',
+            'classes': {
+                0: 'BenignTraffic',
+                1: 'DoS'
+            },
         },
         'spoof': {
             'full_name': 'Sniffing/Spoofing Detection',
             'attack_types': ['ARP Spoofing', 'DNS Spoofing', 'MAC Spoofing'],
             'feature_count': 15,
-
             'model_file': 'spoof_model.onnx',
             'requires_scaler': False,
             'dataset': 'CICIoT2023',
+            'classes': {
+                0: 'BenignTraffic',
+                1: 'Spoofing'
+            },
         },
     }
 
