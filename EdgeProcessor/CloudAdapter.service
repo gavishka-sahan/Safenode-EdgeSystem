@@ -1,0 +1,23 @@
+[Unit]
+Description=Safenode Cloud Adapter - Local-to-Cloud MQTT Bridge
+After=network-online.target mosquitto.service EdgeML.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/nomad/Safenode-EdgeSystem/EdgeProcessor
+ExecStart=/usr/bin/python3 /home/nomad/Safenode-EdgeSystem/EdgeProcessor/CloudAdapter.py
+Restart=always
+RestartSec=10
+
+Environment="PYTHONUNBUFFERED=1"
+
+MemoryMax=1G
+CPUQuota=100%
+
+StandardOutput=append:/var/log/EdgeProcessor/CloudAdapter.log
+StandardError=append:/var/log/EdgeProcessor/CloudAdapter.log
+
+[Install]
+WantedBy=multi-user.target

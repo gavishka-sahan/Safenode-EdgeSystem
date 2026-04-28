@@ -1,0 +1,23 @@
+[Unit]
+Description=Safenode Edge ML - Threat Detection & Severity Engine
+After=network-online.target mosquitto.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/nomad/Safenode-EdgeSystem/EdgeProcessor
+ExecStart=/usr/bin/python3 /home/nomad/Safenode-EdgeSystem/EdgeProcessor/EdgeML.py
+Restart=always
+RestartSec=10
+
+Environment="PYTHONUNBUFFERED=1"
+
+MemoryMax=2G
+CPUQuota=200%
+
+StandardOutput=append:/var/log/EdgeProcessor/EdgeML.log
+StandardError=append:/var/log/EdgeProcessor/EdgeML.log
+
+[Install]
+WantedBy=multi-user.target
