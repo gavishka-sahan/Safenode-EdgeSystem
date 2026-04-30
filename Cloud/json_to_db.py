@@ -63,76 +63,96 @@ def get_protocol(flow_id):
         return "TCP"
 
 
-def resolve_attack_type(detection_data):
-    """Resolve clean attack label from detection JSON."""
-    raw_type = (detection_data.get("attack_type") or "").strip().lower()
-    if raw_type and raw_type not in ("none", "class_1", ""):
-        mapped = ATTACK_TYPE_MAP.get(raw_type)
-        if mapped:
-            return mapped
-
-    threats = detection_data.get("threats", [])
-    if threats:
-        top_threat = max(threats, key=lambda t: t.get("confidence", 0.0))
-
-        threat_type = (top_threat.get("attack_type") or "").strip().lower()
-        mapped = ATTACK_TYPE_MAP.get(threat_type)
-        if mapped:
-            return mapped
-
-        model_name = top_threat.get("model", "").strip().lower()
-        if model_name in MODEL_TO_ATTACK:
-            return MODEL_TO_ATTACK[model_name]
-
-    return "Normal"
-
-
 def insert_pair(feature_data, detection_data):
     """
-    Insert both detection event and traffic feature.
-    Returns (success: bool, attack_label: str | None).
+    Insert one detection event + traffic feature row for EACH model that fired
+    on this flow. If multiple models fired (e.g. dos + replay + spoof on the
+    same flow), each gets its own row so the dashboard reflects all detections
+    rather than collapsing to a single 'winning' label.
+
+    Returns (success: bool, labels: list[str]).
+    A success means at least one (detection, feature) pair inserted cleanly.
     """
-    attack_label = resolve_attack_type(detection_data)
     is_threat = detection_data.get("is_threat", False)
     inference_time = float(detection_data.get("inference_time_ms", 0.0))
     mitigation = detection_data.get("mitigation", "blocked" if is_threat else "none")
-
     features = feature_data.get("features", {})
-    event_id = str(uuid.uuid4())
+    flow_id = feature_data.get("flow_id", "unknown")
+    timestamp = feature_data.get("timestamp", datetime.utcnow().isoformat())
+    src_ip = feature_data.get("src_ip", "0.0.0.0")
+    dst_ip = feature_data.get("dst_ip", "0.0.0.0")
+    protocol = get_protocol(flow_id)
+    byte_count = int(features.get("byte_count", 0))
+    packet_size = float(features.get("avg_packet_size", 0.0))
+    ttl = float(features.get("ttl_value", 0.0))
 
-    detection_payload = {
-        "event_id":              event_id,
-        "attack_type":           attack_label,
-        "severity":              "High" if is_threat else "Low",
-        "model_name":            "EdgeML",
-        "processing_latency_ms": inference_time,
-        "mitigation":            mitigation,
-    }
-    traffic_payload = {
-        "event_id":       event_id,
-        "timestamp":      feature_data.get("timestamp", datetime.utcnow().isoformat()),
-        "src_ip":         feature_data.get("src_ip", "0.0.0.0"),
-        "dst_ip":         feature_data.get("dst_ip", "0.0.0.0"),
-        "protocol":       get_protocol(feature_data.get("flow_id", "unknown")),
-        "byte_count":     int(features.get("byte_count", 0)),
-        "packet_size":    float(features.get("avg_packet_size", 0.0)),
-        "ttl":            float(features.get("ttl_value", 0.0)),
-        "classification": attack_label,
-        "ml":             True,
-        "dl":             False,
-    }
+    # Build the list of (label, model_name, confidence) tuples to insert.
+    # If threats[] is non-empty, insert one row per fired model.
+    # If threats[] is empty (benign flow), insert one row labeled Normal.
+    threats = detection_data.get("threats", [])
+    rows_to_insert = []
 
-    try:
-        r1 = requests.post(f"{API_BASE}/detection-events", json=detection_payload, timeout=5)
-        r2 = requests.post(f"{API_BASE}/traffic-features", json=traffic_payload, timeout=5)
-    except Exception as e:
-        print(f"  ✗ Request error: {e}")
-        return False, None
+    if threats:
+        for threat in threats:
+            model_name = (threat.get("model") or "").strip().lower()
+            threat_type = (threat.get("attack_type") or "").strip().lower()
 
-    ok = r1.status_code in (200, 201) and r2.status_code in (200, 201)
-    if not ok:
-        print(f"  ✗ Insert failed: detection={r1.status_code} traffic={r2.status_code}")
-    return ok, attack_label
+            # Resolve label: prefer the threat's attack_type, fall back to model name
+            label = ATTACK_TYPE_MAP.get(threat_type)
+            if not label and model_name in MODEL_TO_ATTACK:
+                label = MODEL_TO_ATTACK[model_name]
+            if not label:
+                label = "Normal"
+
+            confidence = float(threat.get("confidence", 0.0))
+            rows_to_insert.append((label, model_name or "EdgeML", confidence))
+    else:
+        # Benign flow — keep existing behavior (single Normal row)
+        rows_to_insert.append(("Normal", "EdgeML", 0.0))
+
+    inserted_labels = []
+    any_success = False
+
+    for label, model_name, confidence in rows_to_insert:
+        event_id = str(uuid.uuid4())
+
+        detection_payload = {
+            "event_id":              event_id,
+            "attack_type":           label,
+            "severity":              "High" if is_threat and label != "Normal" else "Low",
+            "model_name":            model_name,
+            "processing_latency_ms": inference_time,
+            "mitigation":            mitigation,
+        }
+        traffic_payload = {
+            "event_id":       event_id,
+            "timestamp":      timestamp,
+            "src_ip":         src_ip,
+            "dst_ip":         dst_ip,
+            "protocol":       protocol,
+            "byte_count":     byte_count,
+            "packet_size":    packet_size,
+            "ttl":            ttl,
+            "classification": label,
+            "ml":             True,
+            "dl":             False,
+        }
+
+        try:
+            r1 = requests.post(f"{API_BASE}/detection-events", json=detection_payload, timeout=5)
+            r2 = requests.post(f"{API_BASE}/traffic-features", json=traffic_payload, timeout=5)
+        except Exception as e:
+            print(f"  ✗ Request error ({label}): {e}")
+            continue
+
+        ok = r1.status_code in (200, 201) and r2.status_code in (200, 201)
+        if ok:
+            any_success = True
+            inserted_labels.append(label)
+        else:
+            print(f"  ✗ Insert failed ({label}): detection={r1.status_code} traffic={r2.status_code}")
+
+    return any_success, inserted_labels
 
 
 def parse_records(raw_lines):
@@ -206,11 +226,13 @@ def main():
 
         detection_data, detection_raw = detection_pair
 
-        ok, label = insert_pair(feature_data, detection_data)
+        ok, labels = insert_pair(feature_data, detection_data)
         if ok:
-            counts[label] = counts.get(label, 0) + 1
-            print(f"  ✓ {label} | {feature_data.get('src_ip', '?')} → {feature_data.get('dst_ip', '?')} | flow={flow_id}")
-            inserted += 1
+            for label in labels:
+                counts[label] = counts.get(label, 0) + 1
+            labels_str = ", ".join(labels) if labels else "(none)"
+            print(f"  ✓ {labels_str} | {feature_data.get('src_ip', '?')} → {feature_data.get('dst_ip', '?')} | flow={flow_id}")
+            inserted += len(labels)
         else:
             # API failure — re-queue both for retry
             failed_pairs.append((feature_raw, detection_raw))
