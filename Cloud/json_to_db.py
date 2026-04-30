@@ -33,13 +33,6 @@ ORPHAN_FILE = os.path.join(DATA_DIR, "orphaned_features.jsonl")
 # With a 60s timer, ORPHAN_THRESHOLD_RUNS=2 means ~2 minutes of grace.
 ORPHAN_THRESHOLD_RUNS = 2
 
-MODEL_THRESHOLDS = {
-    "mirai":  0.30,
-    "dos":    0.20,
-    "replay": 0.80,
-    "spoof":  0.92,
-}
-
 # Map model names and attack_type strings to clean dashboard labels
 MODEL_TO_ATTACK = {
     "mirai":  "Mirai",
@@ -80,16 +73,7 @@ def resolve_attack_type(detection_data):
 
     threats = detection_data.get("threats", [])
     if threats:
-
-        def margin(t):
-            model = t.get("model", "").lower()
-            thr = MODEL_THRESHOLDS.get(model, 0.5)
-            conf = t.get("confidence", 0.0)
-            denom = 1.0 - thr
-            return (conf - thr) / denom if denom > 0 else 0.0
-
-        top_threat = max(threats, key=margin)
-        # top_threat = max(threats, key=lambda t: t.get("confidence", 0.0))
+        top_threat = max(threats, key=lambda t: t.get("confidence", 0.0))
 
         threat_type = (top_threat.get("attack_type") or "").strip().lower()
         mapped = ATTACK_TYPE_MAP.get(threat_type)
