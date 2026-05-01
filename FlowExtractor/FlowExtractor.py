@@ -822,6 +822,70 @@ class FlowManager:
         }
 
 
+EXCLUSIONS_FILE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "exclusions.json"
+)
+
+
+def build_bpf_filter():
+    """
+    Read exclusions.json and build a BPF filter that drops packets matching
+    any of the listed IPs (as either source or destination) or ports before
+    they reach the Python capture loop.
+
+    Schema of exclusions.json:
+        {
+          "exclude_ips":   ["192.168.1.11", ...],
+          "exclude_ports": [41641, ...]
+        }
+
+    Used in deployment to exclude infrastructure traffic (the Pis themselves,
+    the gateway, management-plane VPNs like Tailscale) from analysis without
+    code changes — operator edits exclusions.json and restarts the service.
+
+    Fail-open: if the file is missing or malformed we capture everything
+    rather than refuse to start. An always-on security service that stops
+    capturing on a typo is worse than one that captures too much.
+
+    Returns the BPF filter string, or None if no filter should be applied.
+    """
+    if not os.path.exists(EXCLUSIONS_FILE):
+        logger.info(f"No exclusions file at {EXCLUSIONS_FILE} - capturing all traffic")
+        return None
+
+    try:
+        with open(EXCLUSIONS_FILE) as f:
+            cfg = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        logger.error(f"Could not read {EXCLUSIONS_FILE}: {e} - capturing all traffic")
+        return None
+
+    parts = []
+
+    ips = cfg.get("exclude_ips") or []
+    if ips:
+        # `host X` matches packets where X is either src or dst
+        host_clause = " or ".join(f"host {ip}" for ip in ips)
+        parts.append(f"not ({host_clause})")
+
+    ports = cfg.get("exclude_ports") or []
+    if ports:
+        port_clause = " or ".join(f"port {p}" for p in ports)
+        parts.append(f"not ({port_clause})")
+
+    if not parts:
+        logger.info("Exclusions file is empty - capturing all traffic")
+        return None
+
+    bpf = " and ".join(parts)
+    logger.info(f"Loaded exclusions from {EXCLUSIONS_FILE}")
+    logger.info(f"  Excluded IPs:   {ips}")
+    logger.info(f"  Excluded ports: {ports}")
+    logger.info(f"  BPF filter:     {bpf}")
+    return bpf
+
+
 def main():
     logger.info("=" * 70)
     logger.info("IoT Security Feature Extractor (71 Features)")
@@ -847,12 +911,17 @@ def main():
 
     logger.info("Starting packet capture...")
 
+    bpf = build_bpf_filter()
+    sniff_kwargs = {
+        "iface": Config.INTERFACE,
+        "prn": lambda pkt: fm.process_packet(pkt),
+        "store": False,
+    }
+    if bpf:
+        sniff_kwargs["filter"] = bpf
+
     try:
-        sniff(
-            iface=Config.INTERFACE,
-            prn=lambda pkt: fm.process_packet(pkt),
-            store=False
-        )
+        sniff(**sniff_kwargs)
     except KeyboardInterrupt:
         logger.info("\n" + "=" * 70)
         logger.info("SHUTTING DOWN")
@@ -888,3 +957,4 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         Config.INTERFACE = sys.argv[1]
     main()
+
