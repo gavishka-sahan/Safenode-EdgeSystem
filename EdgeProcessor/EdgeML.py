@@ -4,6 +4,7 @@ import sys
 import json
 import time
 import uuid
+import ipaddress
 import logging
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -77,6 +78,12 @@ class Config:
     # Completed and new_packets exports are always scored regardless of count.
     MIN_PACKETS_FOR_FIRST_EXPORT = 10
 
+    # Statistical-stability gate. Any flow with fewer than this many packets
+    # has unstable feature statistics regardless of export reason: IAT std,
+    # packet size variance, and flag ratios are not meaningful. Such flows
+    # are skipped for inference (still forwarded to cloud as normal traffic).
+    MIN_PACKETS_FOR_INFERENCE = 5
+
     # Logging
     LOG_LEVEL = logging.INFO
     LOG_FILE = Path("/home/nomad/edge_ml.log")
@@ -102,6 +109,40 @@ def setup_logging():
 
 
 logger = setup_logging()
+
+
+def is_out_of_scope_target(dst_ip: str) -> bool:
+    """
+    Return True if dst_ip is an out-of-scope target for ML inference.
+
+    The four detection models (mirai, dos, replay, spoof) are trained on
+    direct host-to-host attack flows from CICIoT2023. Broadcast, multicast,
+    loopback, and unspecified addresses fall outside this designed scope.
+    Asking the models about flows with these destinations produces unreliable
+    extrapolations (high-confidence false positives in practice).
+
+    Flows with these destinations are filtered at the inference boundary;
+    they are still captured, exported, and forwarded to the cloud as normal
+    traffic for visibility.
+    """
+    if not dst_ip:
+        return False
+    try:
+        addr = ipaddress.ip_address(dst_ip)
+    except (ValueError, TypeError):
+        return False
+
+    # 224.0.0.0/4 (multicast), 127.0.0.0/8 (loopback), 0.0.0.0
+    if addr.is_multicast or addr.is_loopback or addr.is_unspecified:
+        return True
+
+    # Limited broadcast (255.255.255.255) and subnet-directed broadcast (x.x.x.255).
+    # is_unspecified handles 0.0.0.0; .255 handles directed broadcasts the
+    # ipaddress module does not classify as broadcast on its own.
+    if dst_ip == "255.255.255.255" or dst_ip.endswith(".255"):
+        return True
+
+    return False
 
 
 class MLModelManager:
@@ -529,12 +570,20 @@ class MQTTHandler:
 
         # Statistics. flows_inferenced distinguishes flows actually scored
         # by the models from raw MQTT messages received — needed because the
-        # early-export filter may skip some flows. Real FP rate is
+        # inference-boundary filters may skip some flows. Real FP rate is
         # threats_detected / flows_inferenced, not / messages_received.
+        #
+        # Skip reasons are tracked separately so the paper's methodology
+        # section can quantify each filter's contribution:
+        #   flows_skipped_early_export  : first export with too few packets
+        #   flows_skipped_low_packet    : any export with < MIN_PACKETS_FOR_INFERENCE
+        #   flows_skipped_invalid_target: broadcast/multicast/loopback/unspecified dst
         self.stats = {
             'messages_received': 0,
             'flows_inferenced': 0,
             'flows_skipped_early_export': 0,
+            'flows_skipped_low_packet': 0,
+            'flows_skipped_invalid_target': 0,
             'threats_detected': 0,
             'isolations_triggered': 0
         }
@@ -584,19 +633,54 @@ class MQTTHandler:
         else:
             indexed_features = convert_named_to_indexed(flow_data)
 
-        # Early-export filter: skip inference when this is the first export of
-        # a flow that hasn't accumulated enough packets to have stable features.
-        # Completed and subsequent (new_packets) exports are always scored, as
-        # are flows whose packet_count is already above the minimum. Skipped
-        # flows are still forwarded to the cloud so the dashboard sees all
-        # traffic; only inference is bypassed.
+        # ----------------------------------------------------------------
+        # Inference-boundary filters.
+        #
+        # Each filter routes the flow around ML inference but lets it through
+        # to cloud forwarding as normal traffic (is_threat=False, no event).
+        # The filters are evaluated in order; the first match wins so each
+        # skip is attributed to a single, specific reason in the stats.
+        #
+        #   1. early-export      : first export of an immature flow
+        #   2. low-packet        : any flow below the statistical-stability floor
+        #   3. invalid-target    : destination outside the models' designed scope
+        # ----------------------------------------------------------------
         export_reason = flow_data.get('export_reason', 'unknown')
         # feature 27 == packet_count (total fwd+bwd)
         packet_count = indexed_features.get(27, indexed_features.get('27', 0)) or 0
-        skip_inference = (
-            export_reason == 'first'
-            and packet_count < Config.MIN_PACKETS_FOR_FIRST_EXPORT
-        )
+        dst_ip = flow_data.get('dst_ip', '') or ''
+
+        skip_inference = False
+        skip_reason_text = None
+        skip_stat_key = None
+
+        if (export_reason == 'first'
+                and packet_count < Config.MIN_PACKETS_FOR_FIRST_EXPORT):
+            skip_inference = True
+            skip_stat_key = 'flows_skipped_early_export'
+            skip_reason_text = (
+                f"first export with {packet_count} packets "
+                f"(< {Config.MIN_PACKETS_FOR_FIRST_EXPORT})"
+            )
+        elif packet_count < Config.MIN_PACKETS_FOR_INFERENCE:
+            # Any export — first, new_packets, completed, age_cap — with too
+            # few packets to have stable feature statistics.
+            skip_inference = True
+            skip_stat_key = 'flows_skipped_low_packet'
+            skip_reason_text = (
+                f"flow has {packet_count} packets "
+                f"(< {Config.MIN_PACKETS_FOR_INFERENCE} for stable features)"
+            )
+        elif is_out_of_scope_target(dst_ip):
+            # Broadcast / multicast / loopback / unspecified destinations are
+            # not in any model's training scope. Flow is treated as normal
+            # traffic for cloud visibility.
+            skip_inference = True
+            skip_stat_key = 'flows_skipped_invalid_target'
+            skip_reason_text = (
+                f"destination {dst_ip} is broadcast/multicast/loopback "
+                f"(out of model scope)"
+            )
 
         # Get device identifier for severity tracking.
         # FlowExtractor does not currently send MAC addresses — fall back to
@@ -622,9 +706,13 @@ class MQTTHandler:
             'timestamp': flow_data.get('timestamp', time.time())
         }
 
-        # Run ML detection unless the early-export filter skipped this flow
+        # Run ML detection unless an inference-boundary filter skipped this flow.
+        # Skipped flows produce a benign result with system_status='operational'
+        # so the dashboard treats them as normal traffic. The skip reason is
+        # preserved in inference_skipped_reason for forensic visibility, but is
+        # not used by any threat-handling logic.
         if skip_inference:
-            self.stats['flows_skipped_early_export'] += 1
+            self.stats[skip_stat_key] += 1
             result = {
                 'feature_id': metadata['feature_id'],
                 'event_id': None,
@@ -634,9 +722,8 @@ class MQTTHandler:
                 'threats_detected': [],
                 'model_results': {},
                 'total_inference_time_ms': 0.0,
-                'system_status': 'skipped_early_export',
-                'skip_reason': f"first export with {packet_count} packets "
-                               f"(< {Config.MIN_PACKETS_FOR_FIRST_EXPORT})"
+                'system_status': 'operational',
+                'inference_skipped_reason': skip_reason_text
             }
         else:
             self.stats['flows_inferenced'] += 1
@@ -815,7 +902,7 @@ def main():
     """Main entry point"""
 
     logger.info("=" * 80)
-    logger.info("EDGE ML MODULE - SEVERITY-BASED THREAT DETECTION v4.1")
+    logger.info("EDGE ML MODULE - SEVERITY-BASED THREAT DETECTION v4.2")
     logger.info("=" * 80)
     logger.info(f"Start Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     logger.info(f"Python: {sys.version}")
@@ -823,6 +910,8 @@ def main():
     logger.info(f"Edge features: {TOTAL_FEATURES}")
     logger.info(f"Cloud features: {TOTAL_CLOUD_FEATURES}")
     logger.info(f"Min packets for first export inference: {Config.MIN_PACKETS_FOR_FIRST_EXPORT}")
+    logger.info(f"Min packets for any inference:         {Config.MIN_PACKETS_FOR_INFERENCE}")
+    logger.info("Out-of-scope dst filter: broadcast / multicast / loopback / unspecified")
     logger.info("")
 
     Config.MODEL_DIR.mkdir(parents=True, exist_ok=True)
@@ -874,18 +963,20 @@ def main():
         logger.info("=" * 80)
 
         logger.info("\nMessage Processing:")
-        logger.info(f"  Messages received:         {handler_stats['messages_received']}")
-        logger.info(f"  Flows inferenced:          {handler_stats['flows_inferenced']}")
-        logger.info(f"  Flows skipped (early):     {handler_stats['flows_skipped_early_export']}")
-        logger.info(f"  Threats detected:          {handler_stats['threats_detected']}")
-        logger.info(f"  Isolations triggered:      {handler_stats['isolations_triggered']}")
+        logger.info(f"  Messages received:               {handler_stats['messages_received']}")
+        logger.info(f"  Flows inferenced:                {handler_stats['flows_inferenced']}")
+        logger.info(f"  Flows skipped (early export):    {handler_stats['flows_skipped_early_export']}")
+        logger.info(f"  Flows skipped (low packet):      {handler_stats['flows_skipped_low_packet']}")
+        logger.info(f"  Flows skipped (invalid target):  {handler_stats['flows_skipped_invalid_target']}")
+        logger.info(f"  Threats detected:                {handler_stats['threats_detected']}")
+        logger.info(f"  Isolations triggered:            {handler_stats['isolations_triggered']}")
 
         # Derived FP-diagnostic ratio: only meaningful against flows actually scored
         if handler_stats['flows_inferenced']:
             threat_rate = (
                 handler_stats['threats_detected'] / handler_stats['flows_inferenced'] * 100
             )
-            logger.info(f"  Threat rate (of inferenced): {threat_rate:.2f}%")
+            logger.info(f"  Threat rate (of inferenced):     {threat_rate:.2f}%")
 
         logger.info("\nML Detection Stats:")
         logger.info(f"  Total flows processed: {detector_stats['total_detections']}")
