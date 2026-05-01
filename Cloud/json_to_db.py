@@ -4,6 +4,14 @@ posts each matched pair as (detection_event, traffic_feature),
 re-queues unmatched features (may pair with a detection next run),
 quarantines true orphans older than the grace period.
 
+Also runs cloud-side DL inference per paired flow:
+    - Loads the ResNet model once per oneshot run (~5s cold start)
+    - Inserts a separate detection-event row labeled DL_ResNet_v3
+    - Logs disagreements between edge and DL (visible on dashboard via
+      the per-row ML/DL dot indicators, so no separate row inserted)
+    - Updates the dl boolean on traffic-features
+    - DL failure is non-fatal — edge rows still insert if DL crashes
+
 Cross-file atomicity:
     Both files are snapshotted in immediate succession so any feature
     whose detection arrives between the two renames is preserved —
@@ -18,6 +26,24 @@ import requests
 from datetime import datetime
 
 from jsonl_utils import snapshot_file, read_lines, requeue_lines, remove_snapshot
+
+# DL inference is optional — if TensorFlow / model artifacts are unavailable,
+# the loader still processes edge rows. Failure here must NOT prevent edge
+# detections from reaching the database.
+#
+# Import the low-level functions instead of handle_dl_inference_from_json
+# because that function POSTs to /detection-events on its own. We need to
+# control the POST ourselves so the DL row shares an event_id with a paired
+# traffic-features row (matching the edge-row pattern).
+try:
+    from DLInferenceService import _run_inference as _dl_run_inference
+    from DLInferenceService import extract_from_json as _dl_extract_from_json
+    DL_AVAILABLE = True
+except Exception as _dl_load_err:
+    print(f"⚠ DL inference unavailable: {_dl_load_err}")
+    _dl_run_inference = None
+    _dl_extract_from_json = None
+    DL_AVAILABLE = False
 
 API_BASE = "http://localhost:8000/api/v1"
 
@@ -63,76 +89,207 @@ def get_protocol(flow_id):
         return "TCP"
 
 
-def resolve_attack_type(detection_data):
-    """Resolve clean attack label from detection JSON."""
-    raw_type = (detection_data.get("attack_type") or "").strip().lower()
-    if raw_type and raw_type not in ("none", "class_1", ""):
-        mapped = ATTACK_TYPE_MAP.get(raw_type)
-        if mapped:
-            return mapped
-
-    threats = detection_data.get("threats", [])
-    if threats:
-        top_threat = max(threats, key=lambda t: t.get("confidence", 0.0))
-
-        threat_type = (top_threat.get("attack_type") or "").strip().lower()
-        mapped = ATTACK_TYPE_MAP.get(threat_type)
-        if mapped:
-            return mapped
-
-        model_name = top_threat.get("model", "").strip().lower()
-        if model_name in MODEL_TO_ATTACK:
-            return MODEL_TO_ATTACK[model_name]
-
-    return "Normal"
-
-
-def insert_pair(feature_data, detection_data):
+def run_dl_inference(features: dict):
     """
-    Insert both detection event and traffic feature.
-    Returns (success: bool, attack_label: str | None).
-    """
-    attack_label = resolve_attack_type(detection_data)
-    is_threat = detection_data.get("is_threat", False)
-    inference_time = float(detection_data.get("inference_time_ms", 0.0))
-    mitigation = detection_data.get("mitigation", "blocked" if is_threat else "none")
+    Run cloud DL inference on a flow's feature dict.
 
-    features = feature_data.get("features", {})
+    Returns dict with keys: predicted_class, confidence, is_threat, probabilities
+    Returns None on any failure — caller treats this as "no DL verdict for this flow"
+    and falls back to edge-only insertion.
+    """
+    if not DL_AVAILABLE or _dl_run_inference is None:
+        return None
+    if not features:
+        return None
+    try:
+        f = _dl_extract_from_json(features)
+        return _dl_run_inference(f)
+    except Exception as e:
+        print(f"  ⚠ DL inference error: {e}")
+        return None
+
+
+def insert_dl_row(label, model_name, severity, mitigation, inference_time,
+                  timestamp, src_ip, dst_ip, protocol,
+                  byte_count, packet_size, ttl, dl_threat_flag):
+    """
+    Insert one (detection_event, traffic_feature) pair labeled by DL.
+    Mirrors the edge insert pattern but with model_name/label from DL.
+
+    Returns True if both inserts succeeded.
+    """
     event_id = str(uuid.uuid4())
 
     detection_payload = {
         "event_id":              event_id,
-        "attack_type":           attack_label,
-        "severity":              "High" if is_threat else "Low",
-        "model_name":            "EdgeML",
+        "attack_type":           label,
+        "severity":              severity,
+        "model_name":            model_name,
         "processing_latency_ms": inference_time,
         "mitigation":            mitigation,
     }
     traffic_payload = {
         "event_id":       event_id,
-        "timestamp":      feature_data.get("timestamp", datetime.utcnow().isoformat()),
-        "src_ip":         feature_data.get("src_ip", "0.0.0.0"),
-        "dst_ip":         feature_data.get("dst_ip", "0.0.0.0"),
-        "protocol":       get_protocol(feature_data.get("flow_id", "unknown")),
-        "byte_count":     int(features.get("byte_count", 0)),
-        "packet_size":    float(features.get("avg_packet_size", 0.0)),
-        "ttl":            float(features.get("ttl_value", 0.0)),
-        "classification": attack_label,
-        "ml":             True,
-        "dl":             False,
+        "timestamp":      timestamp,
+        "src_ip":         src_ip,
+        "dst_ip":         dst_ip,
+        "protocol":       protocol,
+        "byte_count":     byte_count,
+        "packet_size":    packet_size,
+        "ttl":            ttl,
+        "classification": label,
+        "ml":             False,
+        "dl":             dl_threat_flag,
     }
 
     try:
         r1 = requests.post(f"{API_BASE}/detection-events", json=detection_payload, timeout=5)
         r2 = requests.post(f"{API_BASE}/traffic-features", json=traffic_payload, timeout=5)
     except Exception as e:
-        print(f"  ✗ Request error: {e}")
-        return False, None
+        print(f"  ✗ DL insert request error ({label}): {e}")
+        return False
 
     ok = r1.status_code in (200, 201) and r2.status_code in (200, 201)
     if not ok:
-        print(f"  ✗ Insert failed: detection={r1.status_code} traffic={r2.status_code}")
-    return ok, attack_label
+        print(f"  ✗ DL insert failed ({label}): detection={r1.status_code} traffic={r2.status_code}")
+    return ok
+
+
+def insert_pair(feature_data, detection_data):
+    """
+    Insert one detection event + traffic feature row for EACH model that fired
+    on this flow. If multiple models fired (e.g. dos + replay + spoof on the
+    same flow), each gets its own row so the dashboard reflects all detections
+    rather than collapsing to a single 'winning' label.
+
+    Returns (success: bool, labels: list[str]).
+    A success means at least one (detection, feature) pair inserted cleanly.
+    """
+    is_threat = detection_data.get("is_threat", False)
+    inference_time = float(detection_data.get("inference_time_ms", 0.0))
+    mitigation = detection_data.get("mitigation", "blocked" if is_threat else "none")
+    features = feature_data.get("features", {})
+    flow_id = feature_data.get("flow_id", "unknown")
+    timestamp = feature_data.get("timestamp", datetime.utcnow().isoformat())
+    src_ip = feature_data.get("src_ip", "0.0.0.0")
+    dst_ip = feature_data.get("dst_ip", "0.0.0.0")
+    protocol = get_protocol(flow_id)
+    byte_count = int(features.get("byte_count", 0))
+    packet_size = float(features.get("avg_packet_size", 0.0))
+    ttl = float(features.get("ttl_value", 0.0))
+
+    # ── Run cloud DL inference up front so the dl boolean on the edge
+    # rows below reflects the actual DL verdict (rather than a stale False).
+    # If DL fails, dl_result is None and we fall back to dl=False on edge rows
+    # and skip the DL row insert entirely.
+    dl_result = run_dl_inference(features)
+    dl_threat = bool(dl_result["is_threat"]) if dl_result else False
+
+    # Build the list of (label, model_name, confidence) tuples to insert.
+    # If threats[] is non-empty, insert one row per fired model.
+    # If threats[] is empty (benign flow), insert one row labeled Normal.
+    threats = detection_data.get("threats", [])
+    rows_to_insert = []
+
+    if threats:
+        for threat in threats:
+            model_name = (threat.get("model") or "").strip().lower()
+            threat_type = (threat.get("attack_type") or "").strip().lower()
+
+            # Resolve label: prefer the threat's attack_type, fall back to model name
+            label = ATTACK_TYPE_MAP.get(threat_type)
+            if not label and model_name in MODEL_TO_ATTACK:
+                label = MODEL_TO_ATTACK[model_name]
+            if not label:
+                label = "Normal"
+
+            confidence = float(threat.get("confidence", 0.0))
+            rows_to_insert.append((label, model_name or "EdgeML", confidence))
+    else:
+        # Benign flow — keep existing behavior (single Normal row)
+        rows_to_insert.append(("Normal", "EdgeML", 0.0))
+
+    inserted_labels = []
+    any_success = False
+
+    for label, model_name, confidence in rows_to_insert:
+        event_id = str(uuid.uuid4())
+
+        detection_payload = {
+            "event_id":              event_id,
+            "attack_type":           label,
+            "severity":              "High" if is_threat and label != "Normal" else "Low",
+            "model_name":            model_name,
+            "processing_latency_ms": inference_time,
+            "mitigation":            mitigation,
+        }
+        traffic_payload = {
+            "event_id":       event_id,
+            "timestamp":      timestamp,
+            "src_ip":         src_ip,
+            "dst_ip":         dst_ip,
+            "protocol":       protocol,
+            "byte_count":     byte_count,
+            "packet_size":    packet_size,
+            "ttl":            ttl,
+            "classification": label,
+            "ml":             True,
+            "dl":             dl_threat,
+        }
+
+        try:
+            r1 = requests.post(f"{API_BASE}/detection-events", json=detection_payload, timeout=5)
+            r2 = requests.post(f"{API_BASE}/traffic-features", json=traffic_payload, timeout=5)
+        except Exception as e:
+            print(f"  ✗ Request error ({label}): {e}")
+            continue
+
+        ok = r1.status_code in (200, 201) and r2.status_code in (200, 201)
+        if ok:
+            any_success = True
+            inserted_labels.append(label)
+        else:
+            print(f"  ✗ Insert failed ({label}): detection={r1.status_code} traffic={r2.status_code}")
+
+    # ── DL row insertion ────────────────────────────────────────────────
+    # Insert a separate detection-event row representing the cloud DL verdict.
+    # This runs independently of the edge inserts above — even if some edge
+    # inserts failed, we still want the DL second opinion in the database.
+    if dl_result is not None:
+        dl_label = dl_result["predicted_class"]   # Benign / Mirai / Spoof / Scan / DoS
+        dl_severity = "High" if dl_threat else "Low"
+        dl_mitigation = "blocked" if dl_threat else "none"
+
+        if insert_dl_row(
+            label=dl_label,
+            model_name="DL_ResNet_v3",
+            severity=dl_severity,
+            mitigation=dl_mitigation,
+            inference_time=0.0,
+            timestamp=timestamp,
+            src_ip=src_ip,
+            dst_ip=dst_ip,
+            protocol=protocol,
+            byte_count=byte_count,
+            packet_size=packet_size,
+            ttl=ttl,
+            dl_threat_flag=dl_threat,
+        ):
+            inserted_labels.append(f"DL:{dl_label}")
+            any_success = True
+
+        # ── Edge/DL disagreement: log only ──────────────────────────────
+        # Disagreements are visible on the dashboard via the per-row ML/DL
+        # dots (edge=red, DL=green or vice versa), so a separate UNCERTAIN
+        # row would only duplicate that signal. Just log it for the audit
+        # trail and let the dashboard surface it via the dot indicators.
+        edge_threat = bool(is_threat)
+        if edge_threat != dl_threat:
+            edge_view = "threat" if edge_threat else "benign"
+            dl_view = "threat" if dl_threat else "benign"
+            print(f"  ⚠ DISAGREE on flow={flow_id}: edge={edge_view} DL={dl_view} ({dl_label})")
+
+    return any_success, inserted_labels
 
 
 def parse_records(raw_lines):
@@ -206,11 +363,13 @@ def main():
 
         detection_data, detection_raw = detection_pair
 
-        ok, label = insert_pair(feature_data, detection_data)
+        ok, labels = insert_pair(feature_data, detection_data)
         if ok:
-            counts[label] = counts.get(label, 0) + 1
-            print(f"  ✓ {label} | {feature_data.get('src_ip', '?')} → {feature_data.get('dst_ip', '?')} | flow={flow_id}")
-            inserted += 1
+            for label in labels:
+                counts[label] = counts.get(label, 0) + 1
+            labels_str = ", ".join(labels) if labels else "(none)"
+            print(f"  ✓ {labels_str} | {feature_data.get('src_ip', '?')} → {feature_data.get('dst_ip', '?')} | flow={flow_id}")
+            inserted += len(labels)
         else:
             # API failure — re-queue both for retry
             failed_pairs.append((feature_raw, detection_raw))
