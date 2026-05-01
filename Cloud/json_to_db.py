@@ -7,7 +7,8 @@ quarantines true orphans older than the grace period.
 Also runs cloud-side DL inference per paired flow:
     - Loads the ResNet model once per oneshot run (~5s cold start)
     - Inserts a separate detection-event row labeled DL_ResNet_v3
-    - When DL disagrees with edge consensus, inserts an UNCERTAIN row
+    - Logs disagreements between edge and DL (visible on dashboard via
+      the per-row ML/DL dot indicators, so no separate row inserted)
     - Updates the dl boolean on traffic-features
     - DL failure is non-fatal — edge rows still insert if DL crashes
 
@@ -180,7 +181,7 @@ def insert_pair(feature_data, detection_data):
     # ── Run cloud DL inference up front so the dl boolean on the edge
     # rows below reflects the actual DL verdict (rather than a stale False).
     # If DL fails, dl_result is None and we fall back to dl=False on edge rows
-    # and skip the DL/UNCERTAIN inserts entirely.
+    # and skip the DL row insert entirely.
     dl_result = run_dl_inference(features)
     dl_threat = bool(dl_result["is_threat"]) if dl_result else False
 
@@ -277,32 +278,16 @@ def insert_pair(feature_data, detection_data):
             inserted_labels.append(f"DL:{dl_label}")
             any_success = True
 
-        # ── UNCERTAIN flag on edge/DL disagreement ──────────────────────
-        # Edge consensus = is_threat from the detection record (any edge
-        # model fired). DL consensus = dl_threat. If they disagree, insert
-        # an UNCERTAIN row so the dashboard surfaces it for admin review.
+        # ── Edge/DL disagreement: log only ──────────────────────────────
+        # Disagreements are visible on the dashboard via the per-row ML/DL
+        # dots (edge=red, DL=green or vice versa), so a separate UNCERTAIN
+        # row would only duplicate that signal. Just log it for the audit
+        # trail and let the dashboard surface it via the dot indicators.
         edge_threat = bool(is_threat)
         if edge_threat != dl_threat:
             edge_view = "threat" if edge_threat else "benign"
             dl_view = "threat" if dl_threat else "benign"
             print(f"  ⚠ DISAGREE on flow={flow_id}: edge={edge_view} DL={dl_view} ({dl_label})")
-            if insert_dl_row(
-                label="UNCERTAIN",
-                model_name="DisagreementFlag",
-                severity="Medium",
-                mitigation="review",
-                inference_time=0.0,
-                timestamp=timestamp,
-                src_ip=src_ip,
-                dst_ip=dst_ip,
-                protocol=protocol,
-                byte_count=byte_count,
-                packet_size=packet_size,
-                ttl=ttl,
-                dl_threat_flag=dl_threat,
-            ):
-                inserted_labels.append("UNCERTAIN")
-                any_success = True
 
     return any_success, inserted_labels
 
