@@ -7,8 +7,8 @@ from datetime import datetime
 import paho.mqtt.client as mqtt
 
 
-# BROKER = "192.168.8.135"
-BROKER = "192.168.1.11"
+BROKER = "192.168.8.135"
+# BROKER = "192.168.1.11"
 PORT = 1883
 TOPIC = "FlowExtractor/SystemStat"
 INTERFACE = "wlan0"
