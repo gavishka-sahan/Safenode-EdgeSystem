@@ -11,7 +11,7 @@ BROKER = "192.168.8.135"
 # BROKER = "192.168.1.11"
 PORT = 1883
 TOPIC = "FlowExtractor/SystemStat"
-INTERFACE = "wlan0"
+INTERFACE = "eth0"
 INTERVAL = 10                   # Seconds between health report
 
 
