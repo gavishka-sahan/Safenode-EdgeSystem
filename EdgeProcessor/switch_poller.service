@@ -1,23 +1,22 @@
 [Unit]
-Description=IoT SOC - C9200-24T Switch Poller & Isolation Executor
+Description=Safenode Switch Poller - Cisco C9200 Polling & VLAN Isolation
 Documentation=https://github.com/gavishka-sahan/Safenode-EdgeSystem
-After=network-online.target mosquitto.service
+After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=pi
-WorkingDirectory=/home/pi/Safenode-EdgeSystem
-ExecStart=/usr/bin/python3 /home/pi/Safenode-EdgeSystem/switch_poller.py
+User=nomad
+WorkingDirectory=/home/nomad/Safenode-EdgeSystem/EdgeProcessor
+ExecStart=/usr/bin/python3 /home/nomad/Safenode-EdgeSystem/EdgeProcessor/switch_poller.py
 Restart=on-failure
 RestartSec=10
 StartLimitIntervalSec=120
 StartLimitBurst=5
 
-# Logging — journald captures stdout/stderr
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=switch_poller
+SyslogIdentifier=SwitchPoller
 
 [Install]
 WantedBy=multi-user.target
