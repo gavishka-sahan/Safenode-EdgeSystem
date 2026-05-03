@@ -14,7 +14,8 @@ import paho.mqtt.client as mqtt
 
 
 class Config:
-    INTERFACE = "wlan0"
+    # INTERFACE = "wlan0"
+    INTERFACE = "eth0"
 
     # Flow Management
     FLOW_TIMEOUT = 120
@@ -86,12 +87,6 @@ logger.addHandler(_fh)
 
 
 class LogShipper:
-    """
-    Reads only NEW lines from the log file every LOG_SHIP_INTERVAL seconds
-    and publishes them to FlowExtractor/log on the local MQTT broker (QoS 0).
-    Tracks the file byte offset so already-sent lines are never re-sent,
-    even across log rotations (detects rotation by inode change).
-    """
 
     def __init__(self, mqtt_client_ref):
         self._mqtt = mqtt_client_ref   # reference to MQTTPublisher set after it's created
@@ -408,7 +403,6 @@ class Flow:
             self.is_llc = True
 
     def _detect_app_protocol(self, sport, dport, pkt):
-        """Detect application-layer protocol by port and parse MQTT if found."""
         for port in (sport, dport):
             proto = APP_PORTS.get(port)
             if not proto:
@@ -829,27 +823,6 @@ EXCLUSIONS_FILE = os.path.join(
 
 
 def build_bpf_filter():
-    """
-    Read exclusions.json and build a BPF filter that drops packets matching
-    any of the listed IPs (as either source or destination) or ports before
-    they reach the Python capture loop.
-
-    Schema of exclusions.json:
-        {
-          "exclude_ips":   ["192.168.1.11", ...],
-          "exclude_ports": [41641, ...]
-        }
-
-    Used in deployment to exclude infrastructure traffic (the Pis themselves,
-    the gateway, management-plane VPNs like Tailscale) from analysis without
-    code changes — operator edits exclusions.json and restarts the service.
-
-    Fail-open: if the file is missing or malformed we capture everything
-    rather than refuse to start. An always-on security service that stops
-    capturing on a typo is worse than one that captures too much.
-
-    Returns the BPF filter string, or None if no filter should be applied.
-    """
     if not os.path.exists(EXCLUSIONS_FILE):
         logger.info(f"No exclusions file at {EXCLUSIONS_FILE} - capturing all traffic")
         return None
