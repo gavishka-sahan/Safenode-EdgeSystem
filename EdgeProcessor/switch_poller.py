@@ -1,22 +1,25 @@
 """
-Cisco WS-C3650-24TS Switch Poller + Isolation Executor
-=======================================================
-Polls a Cisco Catalyst 3650 switch via SSH, collects port data,
+Cisco C9200-24T Switch Poller + Isolation Executor
+===================================================
+Polls a Cisco Catalyst 9200-24T switch via SSH, collects port data,
 pushes to the IoT SOC Dashboard API, and executes VLAN isolation
 commands when triggered from the dashboard.
 
-Switch: Cisco WS-C3650-24TS (192.168.8.2)
+Switch: Cisco C9200-24T (192.168.8.2)
 API:    http://217.217.248.193/api/v1
 
-Port Layout:
-  Gi1/0/1  - Gi1/0/24  → Ports 1-24 (main access ports)
-  Gi1/1/1  - Gi1/1/4   → Ports 25-28 (uplink module)
+Port Layout (C9200-24T):
+  Gi1/0/1  - Gi1/0/24  → Ports 1-24  (main access ports)
+  Gi1/0/25 - Gi1/0/28  → Ports 25-28 (built-in uplink ports)
+
+  NOTE: Unlike the C3650 (which used a separate Gi1/1/x module for uplinks),
+  the C9200-24T places ALL ports on slot 0. Uplinks are Gi1/0/25–28.
 
 Requirements:
     pip install netmiko requests
 
 Usage:
-    python switch_poller.py
+    python switch_poller_c9200.py
 """
 
 import time
@@ -87,18 +90,22 @@ def cmd(conn, command):
 
 
 # ============================================================
-# PARSERS — Cisco C3650 IOS-XE
+# PARSERS — Cisco C9200-24T IOS-XE
 # ============================================================
 
 
 def parse_interfaces_status(output):
     """
-    C3650 'show interfaces status' output:
+    C9200-24T 'show interfaces status' output:
     Port      Name               Status       Vlan       Duplex  Speed Type
-    Gi1/0/1                      monitoring   1            auto a-1000 10/100/1000BaseTX
+    Gi1/0/1                      notconnect   1            auto   auto 10/100/1000BaseTX
     Gi1/0/2                      connected    1          a-full a-1000 10/100/1000BaseTX
-    Gi1/0/3                      notconnect   1            auto   auto 10/100/1000BaseTX
-    Gi1/1/1                      notconnect   1            auto   auto unknown
+    Gi1/0/24                     notconnect   1            auto   auto 10/100/1000BaseTX
+    Gi1/0/25                     notconnect   1            auto   auto 10/100/1000BaseTX  ← uplinks
+    Gi1/0/28                     notconnect   1            auto   auto 10/100/1000BaseTX
+
+    C9200 IOS-XE 16.x may also show 2.5G/5G speeds on uplinks in some configs.
+    All ports (including uplinks) are in the Gi1/0/x namespace.
     """
     ports = {}
     lines = output.strip().split("\n")
@@ -107,14 +114,13 @@ def parse_interfaces_status(output):
         if not line.strip() or ("Port" in line and "Name" in line) or "---" in line:
             continue
 
-        # Get the port name (first word)
         match = re.match(r"^(\S+)", line)
         if not match:
             continue
 
         port_name = match.group(1)
 
-        # Only process Gi and Te ports
+        # Only process Gi and Te ports (C9200-24T is all Gi, but guard for Te just in case)
         if not any(port_name.startswith(p) for p in ["Gi", "Te", "Fa"]):
             continue
 
@@ -129,23 +135,19 @@ def parse_interfaces_status(output):
         vlan_raw = None
         speed_raw = None
 
-        # Find which part is the status keyword
         for i, part in enumerate(parts):
             if part in status_keywords:
                 if i == 1:
-                    # No device name: Port Status Vlan Duplex Speed Type
                     device_name = None
                     status_raw = parts[1]
                     vlan_raw = parts[2] if len(parts) > 2 else "1"
                     speed_raw = parts[4] if len(parts) > 4 else "auto"
                 elif i == 2:
-                    # Has device name: Port Name Status Vlan Duplex Speed Type
                     device_name = parts[1]
                     status_raw = parts[2]
                     vlan_raw = parts[3] if len(parts) > 3 else "1"
                     speed_raw = parts[5] if len(parts) > 5 else "auto"
                 elif i > 2:
-                    # Multi-word device name
                     device_name = " ".join(parts[1:i])
                     status_raw = parts[i]
                     vlan_raw = parts[i + 1] if len(parts) > i + 1 else "1"
@@ -177,6 +179,7 @@ def parse_interfaces_status(output):
 def parse_interfaces_counters(output):
     """
     Parse 'show interfaces counters' for byte counts.
+    C9200 output format is the same as C3650.
     """
     counters = {}
     lines = output.strip().split("\n")
@@ -209,6 +212,7 @@ def parse_interfaces_counters(output):
 def parse_interfaces_errors(output):
     """
     Parse 'show interfaces counters errors' for error/drop counts.
+    C9200 output format is the same as C3650.
     """
     errors = {}
     lines = output.strip().split("\n")
@@ -227,7 +231,7 @@ def parse_interfaces_errors(output):
 
 def parse_mac_address_table(output):
     """
-    C3650 'show mac address-table dynamic' output:
+    C9200-24T 'show mac address-table dynamic' output:
               Mac Address Table
     -------------------------------------------
 
@@ -236,6 +240,8 @@ def parse_mac_address_table(output):
        1    38fc.98c7.9c64    DYNAMIC     Gi1/0/24
        1    88a2.9e10.f172    DYNAMIC     Gi1/0/2
     Total Mac Addresses for this criterion: 10
+
+    Same format as C3650. All ports are Gi1/0/x on the C9200.
     """
     mac_table = {}
     lines = output.strip().split("\n")
@@ -248,11 +254,9 @@ def parse_mac_address_table(output):
     for line in lines:
         stripped = line.strip()
 
-        # Skip headers and footers
         if not stripped or "Mac Address" in stripped or "---" in stripped or "Total" in stripped or "Unicast" in stripped:
             continue
 
-        # Find MAC (dot format) and port name in the line
         mac_matches = re.findall(r"[0-9a-fA-F]{4}\.[0-9a-fA-F]{4}\.[0-9a-fA-F]{4}", stripped)
         port_matches = re.findall(r"(?:Gi|Te|Fa)\d+/\d+/\d+", stripped)
 
@@ -260,9 +264,6 @@ def parse_mac_address_table(output):
             mac = normalize_mac(mac_matches[0])
             port_name = port_matches[0]
 
-            # For ports with multiple MACs (like uplink Gi1/0/24),
-            # keep the first one found — or overwrite (last wins)
-            # Uplink ports will have many MACs, access ports usually have one
             if port_name not in mac_table:
                 mac_table[port_name] = mac
                 if DEBUG:
@@ -277,11 +278,13 @@ def parse_mac_address_table(output):
 
 def parse_arp_table(output):
     """
-    C3650 'show ip arp' output:
+    C9200-24T 'show ip arp' output:
     Protocol  Address          Age (min)  Hardware Addr   Type   Interface
     Internet  192.168.8.2             -   3890.a54b.d4c7  ARPA   Vlan1
     Internet  192.168.8.3            22   7872.5dcd.06d4  ARPA   Vlan1
     Internet  192.168.8.164           0   a6d0.f90c.868c  ARPA   Vlan1
+
+    Same format as C3650.
     """
     arp_table = {}
     lines = output.strip().split("\n")
@@ -297,7 +300,6 @@ def parse_arp_table(output):
         if not stripped or "Protocol" in stripped or "---" in stripped or "Incomplete" in stripped:
             continue
 
-        # Find IP and MAC anywhere in the line
         ip_match = re.search(r"(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})", stripped)
         mac_match = re.search(r"([0-9a-fA-F]{4}\.[0-9a-fA-F]{4}\.[0-9a-fA-F]{4})", stripped)
 
@@ -305,7 +307,6 @@ def parse_arp_table(output):
             ip = ip_match.group(1)
             mac = normalize_mac(mac_match.group(1))
 
-            # Skip the switch's own IP (the SVI)
             if ip == SWITCH_CONFIG["host"]:
                 if DEBUG:
                     log.info(f"  [ARP] {mac} → {ip} (switch SVI, skipping)")
@@ -321,11 +322,13 @@ def parse_arp_table(output):
 
 def parse_ip_interface_brief(output):
     """
-    C3650 'show ip interface brief' output:
+    C9200-24T 'show ip interface brief' output:
     Interface              IP-Address      OK? Method Status                Protocol
     Vlan1                  192.168.8.2     YES manual up                    up
     GigabitEthernet1/0/1   unassigned      YES unset  up                    down
     GigabitEthernet1/0/2   unassigned      YES unset  up                    up
+
+    Same format as C3650. All physical ports are GigabitEthernet1/0/x.
     """
     interface_ips = {}
     lines = output.strip().split("\n")
@@ -344,7 +347,6 @@ def parse_ip_interface_brief(output):
         if ip == "unassigned" or not re.match(r"\d+\.\d+\.\d+\.\d+", ip):
             continue
 
-        # Shorten interface name
         short_name = interface
         short_name = short_name.replace("GigabitEthernet", "Gi")
         short_name = short_name.replace("TenGigabitEthernet", "Te")
@@ -366,35 +368,39 @@ def parse_ip_interface_brief(output):
 
 def extract_port_number(port_name):
     """
-    C3650 port naming:
-      Gi1/0/1  - Gi1/0/24  → Ports 1-24
-      Gi1/1/1  - Gi1/1/4   → Ports 25-28
+    C9200-24T port numbering — ALL ports are in slot 0:
+      Gi1/0/1  - Gi1/0/24  → Ports 1-24  (access)
+      Gi1/0/25 - Gi1/0/28  → Ports 25-28 (uplinks)
 
-    Extract based on slot and port:
-      Gi1/0/X → X
-      Gi1/1/X → 24 + X
+    Unlike the C3650 which used Gi1/1/x for uplinks (slot 1),
+    the C9200-24T keeps everything on Gi1/0/x. We simply return
+    the port component directly for all slot-0 ports.
     """
     match = re.match(r"(?:Gi|Te|Fa)(\d+)/(\d+)/(\d+)", port_name)
     if match:
-        slot = int(match.group(2))    # 0 or 1
-        port = int(match.group(3))    # port number
+        slot = int(match.group(2))
+        port = int(match.group(3))
         if slot == 0:
-            return port               # 1-24
+            return port       # 1-28 (access 1-24, uplinks 25-28)
+        # C9200-24T has no slot-1 module — guard just in case
         elif slot == 1:
-            return 24 + port          # 25-28
+            return 28 + port  # fallback offset if ever encountered
     return 0
 
 
 def port_number_to_interface(port_number):
     """
-    Convert port number back to C3650 interface name:
-      1-24  → GigabitEthernet1/0/1 - GigabitEthernet1/0/24
-      25-28 → GigabitEthernet1/1/1 - GigabitEthernet1/1/4
+    Convert port number back to C9200-24T interface name.
+    All ports (1-28) are on GigabitEthernet1/0/x.
+
+    C3650 comparison:
+      C3650: ports 25-28 were GigabitEthernet1/1/1-4 (slot 1 module)
+      C9200: ports 25-28 are GigabitEthernet1/0/25-28 (same slot 0)
     """
-    if port_number <= 24:
+    if 1 <= port_number <= 28:
         return f"GigabitEthernet1/0/{port_number}"
-    else:
-        return f"GigabitEthernet1/1/{port_number - 24}"
+    # Fallback for unexpected port numbers
+    return f"GigabitEthernet1/0/{port_number}"
 
 
 def map_port_status(cisco_status):
@@ -417,9 +423,18 @@ def parse_vlan(vlan_raw):
 
 
 def parse_speed(speed_raw, port_name):
+    """
+    C9200-24T supports up to 1G on access ports.
+    Uplink ports (Gi1/0/25-28) are also 1G on the C9200-24T.
+    IOS-XE speed strings may include 'a-' prefix (auto-negotiated).
+    """
     s = speed_raw.lower().replace("a-", "")
     if "10000" in s or "10g" in s:
         return "10G"
+    elif "5000" in s or "5g" in s:
+        return "5G"
+    elif "2500" in s or "2.5g" in s:
+        return "2.5G"
     elif "1000" in s or "1g" in s:
         return "1G"
     elif "100" in s:
@@ -480,6 +495,11 @@ def get_port_vlan_on_switch(conn, interface):
 
 
 def isolate_port_on_switch(conn, port_number):
+    """
+    Isolate a port by moving it to the quarantine VLAN.
+    Uses port_number_to_interface() which maps all ports to Gi1/0/x
+    (correct for C9200-24T — no Gi1/1/x uplink module like the C3650).
+    """
     interface = port_number_to_interface(port_number)
     try:
         ensure_quarantine_vlan(conn)
@@ -594,7 +614,6 @@ def check_and_execute_isolations(conn, db_ports, switch_ports):
     """
     actions = 0
 
-    # Build port_number → switch VLAN lookup
     switch_vlan_map = {}
     for pname, pdata in switch_ports.items():
         switch_vlan_map[pdata["port_number"]] = {
@@ -665,7 +684,6 @@ def poll_switch(conn):
     mac_out = cmd(conn, "show mac address-table dynamic")
 
     # Ping sweep the subnet to populate ARP table
-    # This forces the switch to ARP for all active devices
     log.info("  Running ARP refresh ping sweep...")
     try:
         conn.send_command("ping 192.168.8.255 repeat 1 timeout 1", read_timeout=10)
@@ -712,11 +730,9 @@ def poll_switch(conn):
         if port_num == 0:
             continue
 
-        # Look up MAC and IP
         mac = mac_table.get(port_name)
         ip = arp_table.get(mac) if mac else None
 
-        # For routed interfaces (VLAN=0), use the interface's own IP
         if not ip and port_info["vlan"] == 0:
             ip = interface_ips.get(port_name)
             if DEBUG and ip:
@@ -746,7 +762,6 @@ def poll_switch(conn):
         if port_num in db_ports:
             existing = db_ports[port_num]
 
-            # Don't overwrite isolated status from DB
             if existing.get("status") == "isolated":
                 update = {
                     "bytes_sent": port_data["bytes_sent"],
@@ -768,8 +783,6 @@ def poll_switch(conn):
                     "last_activity": port_data["last_activity"],
                 }
 
-                # Only update IP and MAC if we have values
-                # Don't overwrite existing data with empty strings
                 if port_data["device_ip"]:
                     update["device_ip"] = port_data["device_ip"]
                 if port_data["device_mac"]:
@@ -792,7 +805,7 @@ def poll_switch(conn):
 
 def main():
     log.info("=" * 55)
-    log.info("  IoT SOC — C3650 Switch Poller")
+    log.info("  IoT SOC — C9200-24T Switch Poller")
     log.info(f"  Switch: {SWITCH_CONFIG['host']}")
     log.info(f"  API:    {API_CONFIG['base_url']}")
     log.info(f"  Poll:   {POLL_INTERVAL}s")
