@@ -2,12 +2,9 @@ from typing import Dict, List
 
 
 FEATURE_NAMES: Dict[int, str] = {
-    # Flow Metrics (0-2)
     0: "flow_duration",
     1: "rate",                    # pkts_per_sec
     2: "bytes_per_sec",
-
-    # TCP Flag Counts (3-9)
     3: "syn_count",
     4: "ack_count",
     5: "rst_count",
@@ -15,8 +12,6 @@ FEATURE_NAMES: Dict[int, str] = {
     7: "psh_flag_count",
     8: "fin_flag_count",
     9: "tcp_flags",               # avg of raw TCP flag values
-
-    # Protocol Binary Flags (10-23)
     10: "TCP",
     11: "UDP",
     12: "ICMP",
@@ -31,74 +26,48 @@ FEATURE_NAMES: Dict[int, str] = {
     21: "DHCP",
     22: "IPv4",
     23: "LLC",
-
-    # IP Protocol Number (24)
     24: "proto",                  # ip.proto
-
-    # Packet Size Statistics (25-26)
     25: "pkt_size_avg",           # avg_packet_size
     26: "packet_size_variance",
-
-    # Packet and Byte Counts (27-32)
     27: "packet_count",
     28: "byte_count",
     29: "fwd_packet_count",
     30: "bwd_packet_count",
     31: "fwd_byte_count",
     32: "bwd_byte_count",
-
-    # Directional Packet Length Means (33-34)
     33: "fwd_packet_len_mean",
     34: "bwd_packet_len_mean",
-
-    # Aggregate Size Metrics (35-38)
     35: "Tot_size",
     36: "Tot_sum",
     37: "AVG",                    # same as pkt_size_avg
     38: "Std",                    # std dev of packet sizes
-
-    # Inter-Arrival Time Metrics (39-43)
     39: "iat_mean",               # avg_iat
     40: "iat_std",                # iat_variance
     41: "min_iat",
     42: "max_iat",
     43: "IAT",                    # total inter-arrival time (sum)
-
-    # Frame and TCP Time Deltas (44-45)
     44: "frame.time_delta",
     45: "tcp.time_delta",
-
-    # Frame and TCP Metrics (46-49)
     46: "tcp.len",
     47: "frame.len",
     48: "frame.cap_len",
     49: "tcp.window_size_value",
-
-    # MQTT Features (50-55)
     50: "mqtt.msgtype",
     51: "mqtt.qos",
     52: "mqtt.dupflag",
     53: "mqtt.retain",
     54: "mqtt.len",
     55: "mqtt.topic_len",
-
-    # IP Metadata (56-58)
     56: "ttl_value",
     57: "ip_header_len",
     58: "Init_Win_bytes_Fwd",
-
-    # Source and Destination IPs (59-60)
     59: "source_IP",
     60: "Destination_IP",
-
-    # New Features Round 1 (61-65)
     61: "gre_inner_protocol",     # avg inner protocol number inside GRE packets
     62: "fwd_bwd_ratio",          # fwd_packet_count / bwd_packet_count
     63: "frame_time_delta_bin",   # 1 if any frame_time_delta > threshold, else 0
     64: "ip_len",                 # avg ip.len (IP total length field)
     65: "payload_size",           # avg TCP/UDP application payload bytes
-
-    # New Features Round 2 (66-70) — DoS model
     66: "Max",                    # max frame size in bytes
     67: "Min",                    # min frame size in bytes
     68: "psh_flag_number",        # ratio of PSH flagged packets
@@ -146,34 +115,12 @@ def validate_indices(indices: List[int]) -> bool:
 
 def get_feature_indices_for_model(model_name: str) -> List[int]:
     MODEL_FEATURES = {
-        # REPLAY ATTACK (13 features)
-        # frame_time_delta_bin→63, frame_len→47, ip_len→64, ip_ttl→56,
-        # ip_header_len→57, tcp_window→49, tcp_flag_syn→3, tcp_flag_rst→5,
-        # tcp_flag_fin→8, tcp_flag_ack→4, tcp_flag_psh→7, payload_size→65,
-        # mqtt_dupflag→52
         'replay': [63, 47, 64, 56, 57, 49, 3, 5, 8, 4, 7, 65, 52],
 
-        # DOS ATTACK (18 features)
-        # IAT→43, Rate→1, Max→66, psh_flag_number→68, TCP→10,
-        # Std→38, Variance→26, UDP→11, AVG→37, Tot_size→35,
-        # syn_flag_number→69, ack_flag_number→70, syn_count→3,
-        # HTTP→15, rst_count→5, ICMP→12, fin_count→8, Min→67
         'dos': [43, 1, 66, 68, 10, 38, 26, 11, 37, 35, 69, 70, 3, 15, 5, 12, 8, 67],
 
-        # MIRAI BOTNET (19 features)
-        # flow_duration→0, rate→1, syn_count→3, rst_count→5,
-        # HTTP→15, HTTPS→16, DNS→14, SSH→19, IRC→20, TCP→10,
-        # UDP→11, DHCP→21, ICMP→12, avg_packet_size→25,
-        # inter_arrival_std→40, fin_count→8, gre_inner_protocol→61,
-        # fwd_bwd_ratio→62, pkt_size_variance→26
- # 'mirai': [0, 1, 3, 5, 15, 16, 14, 19, 20, 10, 11, 21, 12, 25, 40, 8],
         'mirai': [0, 25, 1, 40, 3, 8, 14, 10, 11, 5],
-# 61, 62, 26
-        # SPOOFING (15 features)
-        # ttl_value→56, syn_count→3, ack_count→4, rst_count→5,
-        # iat_mean→39, iat_std→40, rate→1, flow_duration→0,
-        # tcp.window_size_value→49, pkt_size_avg→25, ARP→13,
-        # DNS→14, proto→24, fwd_packet_count→29, bwd_packet_count→30
+
         'spoof': [56, 3, 4, 5, 39, 40, 1, 0, 49, 25, 13, 14, 24, 29, 30],
 
     }
@@ -187,12 +134,9 @@ def get_model_info(model_name: str) -> Dict:
             'full_name': 'Mirai Botnet Detection',
 
             'attack_types': ['Mirai-greeth_flood', 'Mirai-greip_flood', 'Mirai-udpplain'],
-            'feature_count': 19,
-
+            'feature_count': 10,
             'model_file': 'mirai_model.onnx',
             'requires_scaler': False,
-            'accuracy': 0.83,
-           # 'inference_time_ms': -,
             'dataset': 'CICIoT2023',
             'classes': {
                 0: 'BenignTraffic',

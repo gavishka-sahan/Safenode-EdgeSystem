@@ -67,21 +67,8 @@ class Config:
     CLOUD_FORWARD_ENABLED = True
     BATCH_SIZE = 1
 
-    # Early-export filtering.
-    # FlowExtractor publishes each flow multiple times (first, new_packets,
-    # completed). The very first export often fires on only 2-5 packets, which
-    # is statistically unreliable: IAT std, avg packet size, and flag ratios
-    # haven't stabilized. Training was done on mature flow statistics, so these
-    # early exports are a significant FP source. We skip inference on "first"
-    # exports that have fewer than MIN_PACKETS_FOR_FIRST_EXPORT packets and
-    # let the next export (with more packets) be the one that's scored.
-    # Completed and new_packets exports are always scored regardless of count.
     MIN_PACKETS_FOR_FIRST_EXPORT = 10
 
-    # Statistical-stability gate. Any flow with fewer than this many packets
-    # has unstable feature statistics regardless of export reason: IAT std,
-    # packet size variance, and flag ratios are not meaningful. Such flows
-    # are skipped for inference (still forwarded to cloud as normal traffic).
     MIN_PACKETS_FOR_INFERENCE = 5
 
     # Logging
@@ -111,20 +98,7 @@ def setup_logging():
 logger = setup_logging()
 
 
-def is_out_of_scope_target(dst_ip: str) -> bool:
-    """
-    Return True if dst_ip is an out-of-scope target for ML inference.
-
-    The four detection models (mirai, dos, replay, spoof) are trained on
-    direct host-to-host attack flows from CICIoT2023. Broadcast, multicast,
-    loopback, and unspecified addresses fall outside this designed scope.
-    Asking the models about flows with these destinations produces unreliable
-    extrapolations (high-confidence false positives in practice).
-
-    Flows with these destinations are filtered at the inference boundary;
-    they are still captured, exported, and forwarded to the cloud as normal
-    traffic for visibility.
-    """
+def is_	out_of_scope_target(dst_ip: str) -> bool:
     if not dst_ip:
         return False
     try:
@@ -136,9 +110,6 @@ def is_out_of_scope_target(dst_ip: str) -> bool:
     if addr.is_multicast or addr.is_loopback or addr.is_unspecified:
         return True
 
-    # Limited broadcast (255.255.255.255) and subnet-directed broadcast (x.x.x.255).
-    # is_unspecified handles 0.0.0.0; .255 handles directed broadcasts the
-    # ipaddress module does not classify as broadcast on its own.
     if dst_ip == "255.255.255.255" or dst_ip.endswith(".255"):
         return True
 
@@ -262,18 +233,6 @@ class MLModelManager:
         logger.info("=" * 80)
 
     def select_features(self, all_features: Dict[int, float], model_name: str) -> np.ndarray:
-        """
-        Build the feature vector for a given model.
-
-        Previously this silently substituted 0.0 for any missing feature. That
-        hid real feature-extraction bugs and, because models (e.g. mirai) can
-        predict high-confidence attack on all-zero input, turned one missing
-        feature into a false positive at runtime.
-
-        Now: missing features are still substituted with 0.0 to keep inference
-        running (better than a crash in a detection loop), but every occurrence
-        is logged as a warning and counted, so they are visible and actionable.
-        """
         indices = self.feature_indices[model_name]
         selected = []
         missing = []
@@ -362,15 +321,6 @@ class MLModelManager:
                 predicted_class = 1 if is_threat else 0
 
             elif len(output.shape) == 2 and output.shape[1] > 2:
-                # Multi-class (>2) output — previously used raw argmax and
-                # ignored get_model_threshold(), which meant any attack class
-                # winning the argmax became a threat even at low confidence
-                # (e.g. P(benign)=0.45, P(greip)=0.28 still flagged as threat).
-                #
-                # Fix: gate on benign probability. Flag as threat only if
-                # P(benign) < (1 - threshold). With mirai threshold=0.3, this
-                # means "only flag if P(benign) < 0.7" — benign-leaning but
-                # ambiguous predictions now stay benign.
                 probs = output[0]
                 benign_prob = float(probs[0])
                 threshold = self.get_model_threshold(model_name)
@@ -568,16 +518,6 @@ class MQTTHandler:
         # Initialize Severity Manager
         self.severity_manager = ThreatSeverityManager()
 
-        # Statistics. flows_inferenced distinguishes flows actually scored
-        # by the models from raw MQTT messages received — needed because the
-        # inference-boundary filters may skip some flows. Real FP rate is
-        # threats_detected / flows_inferenced, not / messages_received.
-        #
-        # Skip reasons are tracked separately so the paper's methodology
-        # section can quantify each filter's contribution:
-        #   flows_skipped_early_export  : first export with too few packets
-        #   flows_skipped_low_packet    : any export with < MIN_PACKETS_FOR_INFERENCE
-        #   flows_skipped_invalid_target: broadcast/multicast/loopback/unspecified dst
         self.stats = {
             'messages_received': 0,
             'flows_inferenced': 0,
@@ -633,18 +573,6 @@ class MQTTHandler:
         else:
             indexed_features = convert_named_to_indexed(flow_data)
 
-        # ----------------------------------------------------------------
-        # Inference-boundary filters.
-        #
-        # Each filter routes the flow around ML inference but lets it through
-        # to cloud forwarding as normal traffic (is_threat=False, no event).
-        # The filters are evaluated in order; the first match wins so each
-        # skip is attributed to a single, specific reason in the stats.
-        #
-        #   1. early-export      : first export of an immature flow
-        #   2. low-packet        : any flow below the statistical-stability floor
-        #   3. invalid-target    : destination outside the models' designed scope
-        # ----------------------------------------------------------------
         export_reason = flow_data.get('export_reason', 'unknown')
         # feature 27 == packet_count (total fwd+bwd)
         packet_count = indexed_features.get(27, indexed_features.get('27', 0)) or 0
@@ -663,8 +591,6 @@ class MQTTHandler:
                 f"(< {Config.MIN_PACKETS_FOR_FIRST_EXPORT})"
             )
         elif packet_count < Config.MIN_PACKETS_FOR_INFERENCE:
-            # Any export — first, new_packets, completed, age_cap — with too
-            # few packets to have stable feature statistics.
             skip_inference = True
             skip_stat_key = 'flows_skipped_low_packet'
             skip_reason_text = (
@@ -672,9 +598,6 @@ class MQTTHandler:
                 f"(< {Config.MIN_PACKETS_FOR_INFERENCE} for stable features)"
             )
         elif is_out_of_scope_target(dst_ip):
-            # Broadcast / multicast / loopback / unspecified destinations are
-            # not in any model's training scope. Flow is treated as normal
-            # traffic for cloud visibility.
             skip_inference = True
             skip_stat_key = 'flows_skipped_invalid_target'
             skip_reason_text = (
@@ -682,12 +605,6 @@ class MQTTHandler:
                 f"(out of model scope)"
             )
 
-        # Get device identifier for severity tracking.
-        # FlowExtractor does not currently send MAC addresses — fall back to
-        # src_ip. This groups all flows from one host under one key, which is
-        # acceptable now that severity dedups by (flow_id, model_name) and
-        # thresholds have been relaxed. Revisit when FlowExtractor is updated
-        # to emit MACs (see outstanding bugs list).
         device_mac = (
             flow_data.get('src_mac')                          # real MAC if ever added
             or flow_data.get('device_info', {}).get('src_mac')
@@ -706,11 +623,6 @@ class MQTTHandler:
             'timestamp': flow_data.get('timestamp', time.time())
         }
 
-        # Run ML detection unless an inference-boundary filter skipped this flow.
-        # Skipped flows produce a benign result with system_status='operational'
-        # so the dashboard treats them as normal traffic. The skip reason is
-        # preserved in inference_skipped_reason for forensic visibility, but is
-        # not used by any threat-handling logic.
         if skip_inference:
             self.stats[skip_stat_key] += 1
             result = {
