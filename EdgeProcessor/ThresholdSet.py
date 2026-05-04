@@ -1,22 +1,4 @@
 #!/usr/bin/env python3
-"""
-Threat Severity Manager
-Tracks detections per device and classifies severity based on count within time window
-
-Severity Levels:
-- CRITICAL (>=5 flows/60s): Auto-Isolate
-- HIGH (3-4 flows/60s): Isolate + Alert
-- MEDIUM (2 flows/60s): Alert Only
-- LOW (1 flow/60s): Log Only
-
-Dedup policy:
-  A single flow can be exported multiple times by FlowExtractor (first, new_packets,
-  completed). Without dedup, one benign flow false-positiving on N exports would
-  inflate severity and trigger isolation. We dedup by (flow_id, model_name) inside
-  the active window: repeated detections for the same flow+model refresh the
-  existing entry rather than stacking. Different models on the same flow count
-  separately, because they represent independent detection signals.
-"""
 
 import time
 import logging
@@ -29,22 +11,11 @@ logger = logging.getLogger(__name__)
 
 
 class SeverityConfig:
-    """Severity thresholds"""
     WINDOW_SECONDS = 60
     CRITICAL_THRESHOLD = 5
     HIGH_THRESHOLD = 3
     MEDIUM_THRESHOLD = 2
     MIN_CONFIDENCE = 0.70
-
-    # Model-specific thresholds.
-    #
-    # Previously mirai used {'critical': 3, 'high': 2, 'medium': 1}, justified by
-    # a claimed 99.99% training accuracy. On real deployment traffic the mirai
-    # model exhibits a ~75% FP rate, so those tight thresholds caused instant
-    # escalation and isolation on benign traffic.
-    #
-    # Aligned to the other models until real-world FP rate has been measured
-    # post-retrain and re-calibrated.
     MODEL_THRESHOLDS = {
         'mirai': {'critical': 5, 'high': 3, 'medium': 2},
         'dos': {'critical': 5, 'high': 3, 'medium': 2},
@@ -122,15 +93,6 @@ class ThreatSeverityManager:
                          confidence: float, model_name: str,
                          flow_id: str = "",
                          features_summary: dict = None) -> SeverityDecision:
-        """
-        Record detection and return severity decision.
-
-        Dedup rule: if a Detection with the same (flow_id, model_name) already
-        exists inside the active window for this device, update it in place
-        (refresh timestamp, keep max confidence) instead of appending. This
-        prevents repeated exports of the same flow from inflating the count.
-        Detections with an empty flow_id are never deduped (treated as unique).
-        """
         now = time.time()
 
         # Check confidence threshold
@@ -193,10 +155,6 @@ class ThreatSeverityManager:
 
     def _find_existing_detection(self, device_mac: str, flow_id: str,
                                  model_name: str) -> Optional[Detection]:
-        """
-        Find an existing detection for (flow_id, model_name) in the active window.
-        Returns None if flow_id is empty (no dedup key) or if not found.
-        """
         if not flow_id:
             return None
         for d in self.detection_history[device_mac]:
