@@ -284,13 +284,12 @@ class Flow:
         self.tcp_completed = False
 
         # New features (61-65)
-        self.gre_inner_protocols = []   # inner proto numbers seen inside GRE packets
-        self.ip_lengths = []            # ip.len values (IP total length field)
-        self.payload_sizes = []         # TCP/UDP application payload bytes per packet
+        self.gre_inner_protocols = []
+        self.ip_lengths = []
+        self.payload_sizes = []
 
         # New features (66-70) are computed from existing accumulators — no new lists needed
     def update(self, pkt, timestamp):
-        """Update flow with a new packet."""
         self.last_seen = timestamp
         self.packet_times.append(timestamp)
 
